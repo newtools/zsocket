@@ -26,7 +26,6 @@ localif=veth.${vethname}
 tempif=vethc.${vethname}
 ip link add name $localif type veth peer name $tempif
 
-# add local interface to bridge
 ip link set $localif mtu $mtu
 ip link set $localif up
 
