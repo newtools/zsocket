@@ -2,12 +2,9 @@ package zsocket
 
 import (
 	"fmt"
-	"log"
 	"os"
-	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -53,8 +50,7 @@ var (
 	_TP_USEC_START    int
 	_TP_USEC_STOP     int
 
-	_TX_START   int
-	_TX_START64 uint64
+	_TX_START int
 )
 
 // the top of every frame in the ring buffer looks like this:
@@ -67,66 +63,30 @@ var (
 //         unsigned int    tp_sec;
 //         unsigned int    tp_usec;
 //};
-//pad[?]
-//struct sockaddr_ll {
-//         unsigned short  sll_family;
-//         __be16          sll_protocol;
-//         int             sll_ifindex;
-//         unsigned short  sll_hatype;
-//         unsigned char   sll_pkttype;
-//         unsigned char   sll_halen;
-//         unsigned char   sll_addr[8];
-//};
-
 func init() {
 	_TP_LEN_START = _LONG_SIZE
-	/*	r := _TP_LEN_START % _TPACKET_ALIGNMENT
-		if r < _INT_SIZE {
-			_TP_LEN_START += r
-		}*/
 	_TP_LEN_STOP = _TP_LEN_START + _INT_SIZE
 
 	_TP_SNAPLEN_START = _TP_LEN_STOP
-	/*	r = _TP_SNAPLEN_START % _TPACKET_ALIGNMENT
-		if r < _INT_SIZE {
-			_TP_SNAPLEN_START += r
-		}*/
 	_TP_SNAPLEN_STOP = _TP_SNAPLEN_START + _INT_SIZE
 
 	_TP_MAC_START = _TP_SNAPLEN_STOP
-	/*	r = _TP_MAC_START % _TPACKET_ALIGNMENT
-		if r < _SHORT_SIZE {
-			_TP_MAC_START += r
-		}*/
 	_TP_MAC_STOP = _TP_MAC_START + _SHORT_SIZE
 
 	_TP_NET_START = _TP_MAC_STOP
-	/*	r = _TP_NET_START % _TPACKET_ALIGNMENT
-		if r < _SHORT_SIZE {
-			_TP_NET_START += r
-		}*/
 	_TP_NET_STOP = _TP_NET_START + _SHORT_SIZE
 
 	_TP_SEC_START = _TP_NET_STOP
-	/*	r = _TP_SEC_START % _TPACKET_ALIGNMENT
-		if r < _INT_SIZE {
-			_TP_SEC_START += r
-		}*/
 	_TP_SEC_STOP = _TP_SEC_START + _INT_SIZE
 
 	_TP_USEC_START = _TP_SEC_START
-	/*	r = _TP_USEC_START % _TPACKET_ALIGNMENT
-		if r < _INT_SIZE {
-			_TP_USEC_START += r
-		}*/
 	_TP_USEC_STOP = _TP_USEC_START + _INT_SIZE
 
-	_TX_START = _TP_USEC_START
+	_TX_START = _TP_USEC_STOP
 	r := _TX_START % _TPACKET_ALIGNMENT
 	if r > 0 {
-		_TX_START += r
+		_TX_START += (_TPACKET_ALIGNMENT - r)
 	}
-	_TX_START64 = uint64(_TX_START)
 }
 
 func errnoErr(e syscall.Errno) error {
@@ -143,8 +103,8 @@ func errnoErr(e syscall.Errno) error {
 	return e
 }
 
-func copyFx(dst, src []byte) {
-	copy(dst, src)
+func copyFx(dst, src []byte, len uint64) {
+	copy(dst, src[:len])
 }
 
 type Locker interface {
@@ -158,27 +118,23 @@ func (l *EmptyLock) Lock()   {}
 func (l *EmptyLock) Unlock() {}
 
 type ZSocket struct {
-	socket        int
-	raw           []byte
-	packetTimeout int
-	listening     int32
-	frameNum      int
-	frameSize     int
-	txIndex       int
-	rxEnabled     bool
-	txEnabled     bool
-	txPollCond    *sync.Cond
-	txChan        chan *txFrame
-	txFrameSize   uint64
-	txError       error
-	rxFrames      []*ringFrame
-	txFrames      []*txFrame
+	socket      int
+	raw         []byte
+	listening   int32
+	frameNum    int
+	frameSize   int
+	rxEnabled   bool
+	txEnabled   bool
+	txChan      chan *ringFrame
+	txFrameSize uint64
+	txError     error
+	rxFrames    []*ringFrame
+	txFrames    []*ringFrame
 }
 
-func NewZSocket(ethIndex, options, blockNum int, ethType EthType, packetTimeout int) (*ZSocket, error) {
+func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, error) {
 	zs := new(ZSocket)
 
-	zs.packetTimeout = packetTimeout
 	eT := hostToNetwork.htons(ethType[0:])
 	// in Linux PF_PACKET is actually defined by AF_PACKET.
 	sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(eT))
@@ -240,28 +196,31 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType, packetTimeout 
 	if zs.rxEnabled {
 		for i = 0; i < zs.frameNum; i++ {
 			frLoc = i * zs.frameSize
-			f := ringFrame(zs.raw[frLoc : frLoc+zs.frameSize])
-			zs.rxFrames = append(zs.rxFrames, &f)
+			rf := &ringFrame{}
+			rf.raw = zs.raw[frLoc : frLoc+zs.frameSize]
+			zs.rxFrames = append(zs.rxFrames, rf)
 		}
 	}
 	if zs.txEnabled {
-		zs.txPollCond = sync.NewCond(&EmptyLock{})
-		zs.txChan = make(chan *txFrame, zs.frameNum)
-		zs.txFrameSize = _TX_START64 + uint64(zs.frameSize)
-		for t := 0; i < zs.frameNum; i, t = t+1, i+1 {
+		zs.txChan = make(chan *ringFrame, zs.frameNum)
+		zs.txFrameSize = uint64(_TX_START + zs.frameSize)
+		for t := 0; t < zs.frameNum; t, i = t+1, i+1 {
 			frLoc = i * zs.frameSize
-			tx := &txFrame{}
-			f := ringFrame(zs.raw[frLoc : frLoc+zs.frameSize])
-			tx.raw = &f
+			tx := &ringFrame{}
+			tx.raw = zs.raw[frLoc : frLoc+zs.frameSize]
+			tx.txStart = tx.raw[_TX_START:]
 			zs.txFrames = append(zs.txFrames, tx)
-			go tx.frameWriteListener(zs.txPollCond, zs.txChan)
 		}
-		go zs.frameWritePoller()
+		go zs.writeListener()
+	} else {
+		// this is an optimization for the write code so that it doesn't
+		// have to check the boolean txEnabled
+		zs.txError = fmt.Errorf("the TX ring is not enabled on this socket")
 	}
 	return zs, nil
 }
 
-func (zs *ZSocket) Listen(fx func(*Frame, uint64) chan byte) error {
+func (zs *ZSocket) Listen(fx func(*Frame, uint64)) error {
 	if !zs.rxEnabled {
 		return fmt.Errorf("the RX ring is disabled on this socket")
 	}
@@ -272,17 +231,21 @@ func (zs *ZSocket) Listen(fx func(*Frame, uint64) chan byte) error {
 	pfd.fd = zs.socket
 	pfd.events = _POLLERR | _POLLIN
 	pfd.revents = 0
-	cond := sync.NewCond(&EmptyLock{})
+	pfdP := uintptr(pfd.getPointer())
 
-	for rxIndex := 0; rxIndex < zs.frameNum; rxIndex++ {
-		go zs.rxFrames[rxIndex].frameListener(fx, cond, zs.packetTimeout)
-	}
+	rxIndex := 0
+	rf := zs.rxFrames[rxIndex]
 	for {
-		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, uintptr(pfd.getPointer()), uintptr(1), uintptr(1))
+		for ; rf.rxReady(); rf = zs.rxFrames[rxIndex] {
+			f := Frame(rf.raw[rf.macStart():])
+			fx(&f, rf.tpLen())
+			rf.rxSet()
+			rxIndex = (rxIndex + 1) % zs.frameNum
+		}
+		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, pfdP, uintptr(1), uintptr(1))
 		if e1 != 0 {
 			return e1
 		}
-		cond.Broadcast()
 	}
 }
 
@@ -290,10 +253,7 @@ func (zs *ZSocket) Write(buf []byte, len uint64) error {
 	return zs.WriteCopy(buf, len, copyFx)
 }
 
-func (zs *ZSocket) WriteCopy(buf []byte, len uint64, copyFx func(dst, src []byte)) error {
-	if !zs.txEnabled {
-		return fmt.Errorf("the TX ring is not enabled on this socket")
-	}
+func (zs *ZSocket) WriteCopy(buf []byte, len uint64, copyFx func(dst, srcf []byte, len uint64)) error {
 	if zs.txError != nil {
 		return zs.txError
 	}
@@ -301,30 +261,33 @@ func (zs *ZSocket) WriteCopy(buf []byte, len uint64, copyFx func(dst, src []byte
 		return fmt.Errorf("the length of the write exceeds the size of the TX frame")
 	}
 	tx := <-zs.txChan
-	tx.raw.setTpLen(len)
-	tx.raw.setTpSnapLen(len)
-	copyFx((*tx.raw)[_TX_START:_TX_START64+len], buf[:len])
-	tx.raw.txSet()
-	tx.ch <- byte(0x01)
+	tx.setTpLen(len)
+	tx.setTpSnapLen(len)
+	copyFx(tx.txStart, buf, len)
+	tx.txSet()
 	return nil
 }
 
-func (zs *ZSocket) frameWritePoller() {
-	pfd := pollfd{}
+func (zs *ZSocket) writeListener() {
+	pfd := &pollfd{}
 	pfd.fd = zs.socket
 	pfd.events = _POLLERR | _POLLOUT
 	pfd.revents = 0
 	pfdP := uintptr(pfd.getPointer())
+
+	txIndex := 0
+	rf := zs.txFrames[txIndex]
 	for {
+		for ; rf.txReady(); rf = zs.txFrames[txIndex] {
+			zs.txChan <- rf
+			txIndex = (txIndex + 1) % zs.frameNum
+		}
 		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, pfdP, uintptr(1), uintptr(1))
 		if e1 != 0 {
-			log.Printf("TX ring poll for availabile frame failed: %s", e1.Error())
 			zs.txError = e1
 			return
 		}
-		zs.txPollCond.Broadcast()
 	}
-
 }
 
 type tpacketReq struct {
@@ -400,75 +363,41 @@ func (req *pollfd) size() int {
 	return _INT_SIZE + 2*_SHORT_SIZE
 }
 
-type ringFrame []byte
-
-func (rf *ringFrame) frameListener(fx func(*Frame, uint64) chan byte, cond *sync.Cond, timeout int) {
-	for {
-		if rf.rxReady() {
-			macStart := rf.macStart()
-			l := rf.tpLen()
-			f := Frame((*rf)[macStart:])
-			ch := fx(&f, l)
-			if ch == nil {
-				rf.rxSet()
-			} else {
-				select {
-				case <-ch:
-				case <-time.After(time.Duration(timeout) * time.Microsecond):
-				}
-				rf.rxSet()
-			}
-		}
-		cond.Wait()
-	}
+type ringFrame struct {
+	raw     []byte
+	txStart []byte
 }
 
 func (rf *ringFrame) rxReady() bool {
-	return host.long((*rf)[0:_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER
+	return host.long(rf.raw[0:_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER
 }
 
 func (rf *ringFrame) macStart() uint16 {
-	return host.short((*rf)[_TP_MAC_START:_TP_MAC_STOP])
+	return host.short(rf.raw[_TP_MAC_START:_TP_MAC_STOP])
 }
 
 func (rf *ringFrame) tpLen() uint64 {
-	return host.int((*rf)[_TP_LEN_START:_TP_LEN_STOP])
+	return host.int(rf.raw[_TP_LEN_START:_TP_LEN_STOP])
 }
 
 func (rf *ringFrame) setTpLen(v uint64) {
-	host.putInt((*rf)[_TP_LEN_START:_TP_LEN_STOP], v)
+	host.putInt(rf.raw[_TP_LEN_START:_TP_LEN_STOP], v)
 }
 
 func (rf *ringFrame) setTpSnapLen(v uint64) {
-	host.putInt((*rf)[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP], v)
+	host.putInt(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP], v)
 }
 
 func (rf *ringFrame) rxSet() {
-	host.putLong((*rf)[0:_LONG_SIZE], uint64(_TP_STATUS_KERNEL))
-	// todo create synchronize mechanism
+	host.putLong(rf.raw[0:_LONG_SIZE], uint64(_TP_STATUS_KERNEL))
+	// we don't need a memory barrier because
 }
 
 func (rf *ringFrame) txReady() bool {
-	return host.long((*rf)[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0
+	return host.long(rf.raw[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0
 }
 
 func (rf *ringFrame) txSet() {
-	host.putLong((*rf)[0:_LONG_SIZE], uint64(_TP_STATUS_SEND_REQUEST))
-	// todo create synchronize mechanism
-}
-
-type txFrame struct {
-	raw *ringFrame
-	ch  chan byte
-}
-
-func (tx *txFrame) frameWriteListener(pollCond *sync.Cond, ch chan *txFrame) {
-	for {
-		if tx.raw.txReady() {
-			ch <- tx
-			<-tx.ch
-		} else {
-			pollCond.Wait()
-		}
-	}
+	host.putLong(rf.raw[0:_LONG_SIZE], uint64(_TP_STATUS_SEND_REQUEST))
+	// we may need a memory barrier in the future
 }

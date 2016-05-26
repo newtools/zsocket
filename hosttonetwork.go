@@ -54,22 +54,21 @@ type htonShortConv interface {
 func init() {
 	host = shost{}
 	hostToNetwork = shton{}
-	switch runtime.GOARCH {
-	case "mips64", "ppc64":
-	default:
-		if _INT_SIZE == 4 {
-			host.hostIntConv = &leInt32Conv{}
-		} else {
-			host.hostIntConv = &leInt64Conv{}
-		}
-		if _LONG_SIZE == 4 {
-			host.hostLongConv = &leLong32Conv{}
-		} else {
-			host.hostLongConv = &leLong64Conv{}
-		}
-		host.hostShortConv = &leShortConv{}
-		hostToNetwork.htonShortConv = &leShortHtonConv{}
+	// in the future lets account for architectures
+	// that are big endian
+	if _INT_SIZE == 4 {
+		host.hostIntConv = &leInt32Conv{}
+	} else {
+		host.hostIntConv = &leInt64Conv{}
 	}
+	if _LONG_SIZE == 4 {
+		host.hostLongConv = &leLong32Conv{}
+	} else {
+		host.hostLongConv = &leLong64Conv{}
+	}
+	host.hostShortConv = &leShortConv{}
+	hostToNetwork.htonShortConv = &leShortHtonConv{}
+
 }
 
 type leLong32Conv struct{}
