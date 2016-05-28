@@ -5,10 +5,7 @@ package zsocket
 //#define SHORT_SIZE sizeof(short)
 //#define CHAR_SIZE sizeof(char)
 import "C"
-import (
-	"encoding/binary"
-	"runtime"
-)
+import "encoding/binary"
 
 const (
 	_LONG_SIZE  = C.LONG_SIZE
@@ -22,6 +19,7 @@ var host shost
 
 type shton struct {
 	htonShortConv
+	htonIntConv
 }
 
 type shost struct {
@@ -40,8 +38,8 @@ type hostShortConv interface {
 }
 
 type hostIntConv interface {
-	int([]byte) uint64
-	putInt([]byte, uint64)
+	int([]byte) int
+	putInt([]byte, int)
 }
 
 type htonShortConv interface {
@@ -51,11 +49,15 @@ type htonShortConv interface {
 	puthtons([]byte, uint16)
 }
 
+type htonIntConv interface {
+	ntohi([]byte) uint32
+}
+
 func init() {
-	host = shost{}
-	hostToNetwork = shton{}
 	// in the future lets account for architectures
 	// that are big endian
+	host = shost{}
+	hostToNetwork = shton{}
 	if _INT_SIZE == 4 {
 		host.hostIntConv = &leInt32Conv{}
 	} else {
@@ -67,8 +69,8 @@ func init() {
 		host.hostLongConv = &leLong64Conv{}
 	}
 	host.hostShortConv = &leShortConv{}
+	hostToNetwork.htonIntConv = &leInt32HtonConv{}
 	hostToNetwork.htonShortConv = &leShortHtonConv{}
-
 }
 
 type leLong32Conv struct{}
@@ -102,40 +104,48 @@ func (l *leShortConv) short(b []byte) uint16 {
 
 type leInt32Conv struct{}
 
-func (l *leInt32Conv) int(b []byte) uint64 {
-	return uint64(binary.LittleEndian.Uint32(b))
+func (l *leInt32Conv) int(b []byte) int {
+	return int(binary.LittleEndian.Uint32(b))
 }
 
-func (l *leInt32Conv) putInt(b []byte, v uint64) {
+func (l *leInt32Conv) putInt(b []byte, v int) {
 	binary.LittleEndian.PutUint32(b, uint32(v))
 }
 
 type leInt64Conv struct{}
 
-func (l *leInt64Conv) int(b []byte) uint64 {
-	return binary.LittleEndian.Uint64(b)
+func (l *leInt64Conv) int(b []byte) int {
+	return int(binary.LittleEndian.Uint64(b))
 }
 
-func (l *leInt64Conv) putInt(b []byte, v uint64) {
-	binary.LittleEndian.PutUint64(b, v)
+func (l *leInt64Conv) putInt(b []byte, v int) {
+	binary.LittleEndian.PutUint64(b, uint64(v))
 }
 
 type leShortHtonConv struct{}
 
 func (l *leShortHtonConv) ntohs(b []byte) uint16 {
-	return uint16(b[0])>>8 | uint16(b[1])<<8
+	return binary.BigEndian.Uint16(b)
 }
 
 func (l *leShortHtonConv) putntohs(b []byte, v uint16) {
-	b[0] = byte((v & 0xff) << 8)
-	b[1] = byte((v & 0x00ff) >> 8)
+	binary.BigEndian.PutUint16(b, v)
 }
 
 func (l *leShortHtonConv) htons(b []byte) uint16 {
-	return uint16(b[0])>>8 | uint16(b[1])<<8
+	return binary.LittleEndian.Uint16(b)
 }
 
 func (l *leShortHtonConv) puthtons(b []byte, v uint16) {
-	b[0] = byte((v & 0xff) << 8)
-	b[1] = byte((v & 0x00ff) >> 8)
+	binary.LittleEndian.PutUint16(b, v)
+}
+
+type leInt32HtonConv struct{}
+
+func (l *leInt32HtonConv) ntohi(b []byte) uint32 {
+	// return uint32(b[0])>>24 |
+	// 	uint32(b[1])>>8 |
+	// 	uint32(b[2])<<8 |
+	// 	uint32(b[3])<<24
+	return binary.BigEndian.Uint32(b)
 }

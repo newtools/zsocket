@@ -3,6 +3,8 @@ package zsocket
 import (
 	"fmt"
 	"os"
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -43,12 +45,12 @@ var (
 	_TP_LEN_STOP      int
 	_TP_SNAPLEN_START int
 	_TP_SNAPLEN_STOP  int
-	_TP_NET_START     int
-	_TP_NET_STOP      int
-	_TP_SEC_START     int
-	_TP_SEC_STOP      int
-	_TP_USEC_START    int
-	_TP_USEC_STOP     int
+	// _TP_NET_START     int
+	// _TP_NET_STOP      int
+	// _TP_SEC_START     int
+	// _TP_SEC_STOP      int
+	// _TP_USEC_START    int
+	// _TP_USEC_STOP     int
 
 	_TX_START int
 )
@@ -73,16 +75,17 @@ func init() {
 	_TP_MAC_START = _TP_SNAPLEN_STOP
 	_TP_MAC_STOP = _TP_MAC_START + _SHORT_SIZE
 
-	_TP_NET_START = _TP_MAC_STOP
-	_TP_NET_STOP = _TP_NET_START + _SHORT_SIZE
+	// _TP_NET_START = _TP_MAC_STOP
+	// _TP_NET_STOP = _TP_NET_START + _SHORT_SIZE
 
-	_TP_SEC_START = _TP_NET_STOP
-	_TP_SEC_STOP = _TP_SEC_START + _INT_SIZE
+	// _TP_SEC_START = _TP_NET_STOP
+	// _TP_SEC_STOP = _TP_SEC_START + _INT_SIZE
 
-	_TP_USEC_START = _TP_SEC_START
-	_TP_USEC_STOP = _TP_USEC_START + _INT_SIZE
+	// _TP_USEC_START = _TP_SEC_START
+	// _TP_USEC_STOP = _TP_USEC_START + _INT_SIZE
 
-	_TX_START = _TP_USEC_STOP
+	// _TX_START = _TP_USEC_STOP
+	_TX_START = _TP_MAC_STOP + _SHORT_SIZE + _INT_SIZE + _INT_SIZE
 	r := _TX_START % _TPACKET_ALIGNMENT
 	if r > 0 {
 		_TX_START += (_TPACKET_ALIGNMENT - r)
@@ -103,19 +106,9 @@ func errnoErr(e syscall.Errno) error {
 	return e
 }
 
-func copyFx(dst, src []byte, len uint64) {
-	copy(dst, src[:len])
+func copyFx(dst, src []byte, len int) {
+	copy(dst, src)
 }
-
-type Locker interface {
-	Lock()
-	Unlock()
-}
-
-type EmptyLock struct{}
-
-func (l *EmptyLock) Lock()   {}
-func (l *EmptyLock) Unlock() {}
 
 type ZSocket struct {
 	socket      int
@@ -126,8 +119,10 @@ type ZSocket struct {
 	rxEnabled   bool
 	txEnabled   bool
 	txChan      chan *ringFrame
-	txFrameSize uint64
+	txFrameSize int
 	txError     error
+	txWriteLock *fastRWLock
+	txWritten   uint32
 	rxFrames    []*ringFrame
 	txFrames    []*ringFrame
 }
@@ -202,8 +197,9 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 		}
 	}
 	if zs.txEnabled {
-		zs.txChan = make(chan *ringFrame, zs.frameNum)
-		zs.txFrameSize = uint64(_TX_START + zs.frameSize)
+		zs.txWriteLock = &fastRWLock{&sync.RWMutex{}, 0, 0}
+		zs.txChan = make(chan *ringFrame, zs.frameNum+1)
+		zs.txFrameSize = _TX_START + zs.frameSize
 		for t := 0; t < zs.frameNum; t, i = t+1, i+1 {
 			frLoc = i * zs.frameSize
 			tx := &ringFrame{}
@@ -211,7 +207,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 			tx.txStart = tx.raw[_TX_START:]
 			zs.txFrames = append(zs.txFrames, tx)
 		}
-		go zs.writeListener()
+		go zs.writePoller()
 	} else {
 		// this is an optimization for the write code so that it doesn't
 		// have to check the boolean txEnabled
@@ -220,7 +216,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 	return zs, nil
 }
 
-func (zs *ZSocket) Listen(fx func(*Frame, uint64)) error {
+func (zs *ZSocket) Listen(fx func(*Frame, int)) error {
 	if !zs.rxEnabled {
 		return fmt.Errorf("the RX ring is disabled on this socket")
 	}
@@ -249,26 +245,32 @@ func (zs *ZSocket) Listen(fx func(*Frame, uint64)) error {
 	}
 }
 
-func (zs *ZSocket) Write(buf []byte, len uint64) error {
-	return zs.WriteCopy(buf, len, copyFx)
+func (zs *ZSocket) Write(buf []byte, l int) error {
+	if l > zs.txFrameSize {
+		return fmt.Errorf("the length of the write exceeds the size of the TX frame")
+	}
+	if l < 0 {
+		return zs.WriteCopy(buf, len(buf), copyFx)
+	}
+	return zs.WriteCopy(buf[:l], l, copyFx)
 }
 
-func (zs *ZSocket) WriteCopy(buf []byte, len uint64, copyFx func(dst, srcf []byte, len uint64)) error {
+func (zs *ZSocket) WriteCopy(buf []byte, l int, copyFx func(dst, srcf []byte, l int)) error {
 	if zs.txError != nil {
 		return zs.txError
 	}
-	if len > zs.txFrameSize {
-		return fmt.Errorf("the length of the write exceeds the size of the TX frame")
-	}
 	tx := <-zs.txChan
-	tx.setTpLen(len)
-	tx.setTpSnapLen(len)
-	copyFx(tx.txStart, buf, len)
+	tx.setTpLen(l)
+	tx.setTpSnapLen(l)
+	copyFx(tx.txStart, buf, l)
+	zs.txWriteLock.RLock()
 	tx.txSet()
+	atomic.AddUint32(&zs.txWritten, 1)
+	zs.txWriteLock.RUnlock()
 	return nil
 }
 
-func (zs *ZSocket) writeListener() {
+func (zs *ZSocket) writePoller() {
 	pfd := &pollfd{}
 	pfd.fd = zs.socket
 	pfd.events = _POLLERR | _POLLOUT
@@ -277,10 +279,26 @@ func (zs *ZSocket) writeListener() {
 
 	txIndex := 0
 	rf := zs.txFrames[txIndex]
+	socket := uintptr(zs.socket)
+	z := uintptr(0)
 	for {
-		for ; rf.txReady(); rf = zs.txFrames[txIndex] {
+		for start := 0; rf.txReady(); rf = zs.txFrames[txIndex] {
 			zs.txChan <- rf
 			txIndex = (txIndex + 1) % zs.frameNum
+			start++
+		}
+		if !atomic.CompareAndSwapUint32(&zs.txWritten, 0, 0) {
+			zs.txWriteLock.Lock()
+			for w := zs.txWritten; !atomic.CompareAndSwapUint32(&zs.txWritten, w, 0); w = zs.txWritten {
+				runtime.Gosched()
+			}
+			if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, socket, z, z, z, z, z); e1 != 0 {
+				zs.txError = e1
+				//IMPORTANT!!!
+				zs.txWriteLock.Unlock()
+				return
+			}
+			zs.txWriteLock.Unlock()
 		}
 		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, pfdP, uintptr(1), uintptr(1))
 		if e1 != 0 {
@@ -366,38 +384,82 @@ func (req *pollfd) size() int {
 type ringFrame struct {
 	raw     []byte
 	txStart []byte
-}
-
-func (rf *ringFrame) rxReady() bool {
-	return host.long(rf.raw[0:_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER
+	mb      int32
 }
 
 func (rf *ringFrame) macStart() uint16 {
 	return host.short(rf.raw[_TP_MAC_START:_TP_MAC_STOP])
 }
 
-func (rf *ringFrame) tpLen() uint64 {
+func (rf *ringFrame) tpLen() int {
 	return host.int(rf.raw[_TP_LEN_START:_TP_LEN_STOP])
 }
 
-func (rf *ringFrame) setTpLen(v uint64) {
+func (rf *ringFrame) setTpLen(v int) {
 	host.putInt(rf.raw[_TP_LEN_START:_TP_LEN_STOP], v)
 }
 
-func (rf *ringFrame) setTpSnapLen(v uint64) {
+func (rf *ringFrame) setTpSnapLen(v int) {
 	host.putInt(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP], v)
+}
+
+func (rf *ringFrame) rxReady() bool {
+	return host.long(rf.raw[0:_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
 }
 
 func (rf *ringFrame) rxSet() {
 	host.putLong(rf.raw[0:_LONG_SIZE], uint64(_TP_STATUS_KERNEL))
-	// we don't need a memory barrier because
+	// this acts as a memory barrier
+	atomic.CompareAndSwapInt32(&rf.mb, 1, 0)
 }
 
 func (rf *ringFrame) txReady() bool {
-	return host.long(rf.raw[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0
+	return host.long(rf.raw[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0 && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
 }
 
 func (rf *ringFrame) txSet() {
 	host.putLong(rf.raw[0:_LONG_SIZE], uint64(_TP_STATUS_SEND_REQUEST))
-	// we may need a memory barrier in the future
+	// this acts as a memory barrier
+	atomic.CompareAndSwapInt32(&rf.mb, 1, 0)
+}
+
+// A ReadWrite lock that gives
+// absolutely priority to the writer
+//
+// THIS LOCK SHOULD NOT GET COPIED
+// it assumes only one writer will call
+// Lock at a time. This works for its
+// use case in this codebase, but won't
+// for others
+type fastRWLock struct {
+	rwLock   *sync.RWMutex
+	writting int32
+	readers  int32
+}
+
+func (frw *fastRWLock) RLock() {
+	atomic.AddInt32(&frw.readers, 1)
+	if !atomic.CompareAndSwapInt32(&frw.writting, 0, 0) {
+		atomic.AddInt32(&frw.readers, -1)
+		frw.rwLock.RLock()
+		frw.rwLock.RUnlock()
+		frw.RLock()
+	}
+}
+
+func (frw *fastRWLock) RUnlock() {
+	atomic.AddInt32(&frw.readers, -1)
+}
+
+func (frw *fastRWLock) Lock() {
+	frw.rwLock.Lock()
+	atomic.AddInt32(&frw.writting, 1)
+	for !atomic.CompareAndSwapInt32(&frw.readers, 0, 0) {
+		runtime.Gosched()
+	}
+}
+
+func (frw *fastRWLock) Unlock() {
+	atomic.AddInt32(&frw.writting, -1)
+	frw.rwLock.Unlock()
 }
