@@ -154,6 +154,14 @@ func (f *Frame) String() string {
 		f.GetPayString()
 }
 
+func (f *Frame) StringWithLen(l int) string {
+	return fmt.Sprintf("Frame Len  : %d\n", l) +
+		fmt.Sprintf("MAC Source : %s\n", f.MACSource()) +
+		fmt.Sprintf("MAC Dest   : %s\n", f.MACDestination()) +
+		fmt.Sprintf("MAC Type   : %s\n", f.MACEthertype()) +
+		f.GetPayString()
+}
+
 func (f *Frame) MACSource() net.HardwareAddr {
 	return net.HardwareAddr((*f)[6:12])
 }

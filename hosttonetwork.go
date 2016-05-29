@@ -20,13 +20,17 @@ var host shost
 type shton struct {
 	htonShortConv
 	htonIntConv
+	htonLongConv
 }
 
 type shost struct {
 	hostLongConv
 	hostShortConv
 	hostIntConv
+	byteOrder
 }
+
+type byteOrder binary.ByteOrder
 
 type hostLongConv interface {
 	long([]byte) uint64
@@ -53,6 +57,10 @@ type htonIntConv interface {
 	ntohi([]byte) uint32
 }
 
+type htonLongConv interface {
+	ntohl([]byte) uint64
+}
+
 func init() {
 	// in the future lets account for architectures
 	// that are big endian
@@ -69,8 +77,10 @@ func init() {
 		host.hostLongConv = &leLong64Conv{}
 	}
 	host.hostShortConv = &leShortConv{}
-	hostToNetwork.htonIntConv = &leInt32HtonConv{}
+	host.byteOrder = binary.LittleEndian
+	hostToNetwork.htonIntConv = &leIntHtonConv{}
 	hostToNetwork.htonShortConv = &leShortHtonConv{}
+	hostToNetwork.htonLongConv = &leLongHtonConv{}
 }
 
 type leLong32Conv struct{}
@@ -140,12 +150,14 @@ func (l *leShortHtonConv) puthtons(b []byte, v uint16) {
 	binary.LittleEndian.PutUint16(b, v)
 }
 
-type leInt32HtonConv struct{}
+type leIntHtonConv struct{}
 
-func (l *leInt32HtonConv) ntohi(b []byte) uint32 {
-	// return uint32(b[0])>>24 |
-	// 	uint32(b[1])>>8 |
-	// 	uint32(b[2])<<8 |
-	// 	uint32(b[3])<<24
+func (l *leIntHtonConv) ntohi(b []byte) uint32 {
 	return binary.BigEndian.Uint32(b)
+}
+
+type leLongHtonConv struct{}
+
+func (l *leLongHtonConv) ntohl(b []byte) uint64 {
+	return binary.BigEndian.Uint64(b)
 }

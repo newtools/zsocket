@@ -2,10 +2,9 @@
 container=$1
 ipaddr=$2
 vethname=$3
-subnet=$4
-mac=$5
+netmask=$4
 
-mtu=2500
+mtu=32000
 NSDIR=/var/run/netns
 containerif=eth1
 
@@ -31,6 +30,6 @@ ip link set $localif mtu $mtu
 ip link set $localif up
 
 ip link set $tempif netns $container
-ip netns exec $container ip link set $tempif up mtu $mtu name $containerif address $mac
-ip netns exec $container ip addr replace $ipaddr dev $containerif
-ip netns exec $container ip route add $subnet dev $containerif
+ip netns exec $container ip link set $tempif up mtu $mtu name $containerif
+ip netns exec $container ip addr add $ipaddr dev $containerif
+ip netns exec $container ifconfig $containerif netmask $netmask

@@ -163,11 +163,15 @@ func (p ICMP_P) Checksum() uint16 {
 }
 
 func (p ICMP_P) CalculateChecksum() uint16 {
-	cs := hostToNetwork.htons(p[0:2]) +
-		hostToNetwork.htons(p[4:6]) +
-		hostToNetwork.htons(p[6:8])
-	cs = (cs & 0xffff) + (cs >> 16)
-	return ^cs
+	cs := uint32(hostToNetwork.htons(p[0:2])) +
+		uint32(hostToNetwork.htons(p[4:6])) +
+		uint32(hostToNetwork.htons(p[6:8]))
+	csum := uint16(cs&0xffff) + uint16(cs>>16)
+	csum = ^csum
+	if csum == 0x00 {
+		csum = 0xffff
+	}
+	return csum
 }
 
 func (p ICMP_P) Payload() ICMP_Payload {

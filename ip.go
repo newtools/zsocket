@@ -119,24 +119,28 @@ func (i IPv4_P) Checksum() uint16 {
 }
 
 func (i IPv4_P) CalculateChecksum() uint16 {
-	cs := hostToNetwork.htons(i[0:2]) +
-		hostToNetwork.htons(i[2:4]) +
-		hostToNetwork.htons(i[4:6]) +
-		hostToNetwork.htons(i[6:8]) +
-		hostToNetwork.htons(i[8:10]) +
-		hostToNetwork.htons(i[12:14]) +
-		hostToNetwork.htons(i[14:16]) +
-		hostToNetwork.htons(i[16:18]) +
-		hostToNetwork.htons(i[18:20])
+	cs := uint32(hostToNetwork.htons(i[0:2])) +
+		uint32(hostToNetwork.htons(i[2:4])) +
+		uint32(hostToNetwork.htons(i[4:6])) +
+		uint32(hostToNetwork.htons(i[6:8])) +
+		uint32(hostToNetwork.htons(i[8:10])) +
+		uint32(hostToNetwork.htons(i[12:14])) +
+		uint32(hostToNetwork.htons(i[14:16])) +
+		uint32(hostToNetwork.htons(i[16:18])) +
+		uint32(hostToNetwork.htons(i[18:20]))
 	index := 20
 	for t, l := 0, int(i.IHL()-5); t < l; t++ {
-		cs += hostToNetwork.htons(i[index : index+2])
+		cs += uint32(hostToNetwork.htons(i[index : index+2]))
 		index += 2
-		cs += hostToNetwork.htons(i[index : index+2])
+		cs += uint32(hostToNetwork.htons(i[index : index+2]))
 		index += 2
 	}
-	cs = (cs & 0xffff) + (cs >> 16)
-	return ^cs
+	csum := uint16(cs&0xffff) + uint16(cs>>16)
+	csum = ^csum
+	if csum == 0x00 {
+		csum = 0xffff
+	}
+	return csum
 }
 
 func (i IPv4_P) PacketCorrupt() bool {

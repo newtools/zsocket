@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	ENABLE_RX = 1
-	ENABLE_TX = 2
+	ENABLE_RX    = 1 << 0
+	ENABLE_TX    = 1 << 1
+	ENABLE_LOSS  = 1 << 2
+	ENABLE_DEBUG = 1 << 3
 )
 
 const (
@@ -21,17 +23,28 @@ const (
 	_PACKET_VERSION = 0xa
 	_PACKET_RX_RING = 0x5
 	_PACKET_TX_RING = 0xd
+	_PACKET_LOSS    = 0xe
 
-	_TPACKET_V1 = 0
-
+	_TPACKET_V1        = 0
 	_TPACKET_ALIGNMENT = 16
 	/* rx status */
-	_TP_STATUS_KERNEL = 0
-	_TP_STATUS_USER   = 1 << 0
+	_TP_STATUS_KERNEL          = 0
+	_TP_STATUS_USER            = 1 << 0
+	_TP_STATUS_COPY            = 1 << 1
+	_TP_STATUS_LOSING          = 1 << 2
+	_TP_STATUS_CSUMNOTREADY    = 1 << 3
+	_TP_STATUS_VLAN_VALID      = 1 << 4 /* auxdata has valid tp_vlan_tci */
+	_TP_STATUS_BLK_TMO         = 1 << 5
+	_TP_STATUS_VLAN_TPID_VALID = 1 << 6 /* auxdata has valid tp_vlan_tpid */
+	_TP_STATUS_CSUM_VALID      = 1 << 7
 	/* tx status */
 	_TP_STATUS_AVAILABLE    = 0
-	_TP_STATUS_SEND_REQUEST = (1 << 0)
-	_TP_STATUS_SENDING      = (1 << 1)
+	_TP_STATUS_SEND_REQUEST = 1 << 0
+	_TP_STATUS_SENDING      = 1 << 1
+	_TP_STATUS_WRONG_FORMAT = 1 << 2
+	/* tx and rx status */
+	_TP_STATUS_TS_SOFTWARE     = 1 << 29
+	_TP_STATUS_TS_RAW_HARDWARE = 1 << 31
 	/* poll events */
 	_POLLIN  = 0x01
 	_POLLOUT = 0x04
@@ -45,12 +58,6 @@ var (
 	_TP_LEN_STOP      int
 	_TP_SNAPLEN_START int
 	_TP_SNAPLEN_STOP  int
-	// _TP_NET_START     int
-	// _TP_NET_STOP      int
-	// _TP_SEC_START     int
-	// _TP_SEC_STOP      int
-	// _TP_USEC_START    int
-	// _TP_USEC_STOP     int
 
 	_TX_START int
 )
@@ -75,16 +82,6 @@ func init() {
 	_TP_MAC_START = _TP_SNAPLEN_STOP
 	_TP_MAC_STOP = _TP_MAC_START + _SHORT_SIZE
 
-	// _TP_NET_START = _TP_MAC_STOP
-	// _TP_NET_STOP = _TP_NET_START + _SHORT_SIZE
-
-	// _TP_SEC_START = _TP_NET_STOP
-	// _TP_SEC_STOP = _TP_SEC_START + _INT_SIZE
-
-	// _TP_USEC_START = _TP_SEC_START
-	// _TP_USEC_STOP = _TP_USEC_START + _INT_SIZE
-
-	// _TX_START = _TP_USEC_STOP
 	_TX_START = _TP_MAC_STOP + _SHORT_SIZE + _INT_SIZE + _INT_SIZE
 	r := _TX_START % _TPACKET_ALIGNMENT
 	if r > 0 {
@@ -111,20 +108,22 @@ func copyFx(dst, src []byte, len int) {
 }
 
 type ZSocket struct {
-	socket      int
-	raw         []byte
-	listening   int32
-	frameNum    int
-	frameSize   int
-	rxEnabled   bool
-	txEnabled   bool
-	txChan      chan *ringFrame
-	txFrameSize int
-	txError     error
-	txWriteLock *fastRWLock
-	txWritten   uint32
-	rxFrames    []*ringFrame
-	txFrames    []*ringFrame
+	socket        int
+	raw           []byte
+	listening     int32
+	frameNum      int
+	frameSize     int
+	rxEnabled     bool
+	txEnabled     bool
+	debug         bool
+	txLossEnabled bool
+	txChan        chan *ringFrame
+	txFrameSize   int
+	txError       error
+	txWriteLock   *fastRWLock
+	txWritten     uint32
+	rxFrames      []*ringFrame
+	txFrames      []*ringFrame
 }
 
 func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, error) {
@@ -147,6 +146,8 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 
 	zs.rxEnabled = options&ENABLE_RX == ENABLE_RX
 	zs.txEnabled = options&ENABLE_TX == ENABLE_TX
+	zs.txLossEnabled = options&ENABLE_LOSS == ENABLE_LOSS
+	zs.debug = options&ENABLE_DEBUG == ENABLE_DEBUG
 
 	if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_VERSION, _TPACKET_V1); err != nil {
 		return nil, err
@@ -161,6 +162,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 	req.blockNum = uint(blockNum)
 	req.frameNum = (req.blockSize / req.frameSize) * req.blockNum
 	reqP := req.getPointer()
+
 	if zs.rxEnabled {
 		_, _, e1 := syscall.Syscall6(uintptr(syscall.SYS_SETSOCKOPT), uintptr(sock), uintptr(syscall.SOL_PACKET), uintptr(_PACKET_RX_RING), uintptr(reqP), uintptr(req.size()), 0)
 		if e1 != 0 {
@@ -171,6 +173,11 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 		_, _, e1 := syscall.Syscall6(uintptr(syscall.SYS_SETSOCKOPT), uintptr(sock), uintptr(syscall.SOL_PACKET), uintptr(_PACKET_TX_RING), uintptr(reqP), uintptr(req.size()), 0)
 		if e1 != 0 {
 			return nil, errnoErr(e1)
+		}
+		if zs.txLossEnabled {
+			if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_LOSS, 1); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -228,12 +235,14 @@ func (zs *ZSocket) Listen(fx func(*Frame, int)) error {
 	pfd.events = _POLLERR | _POLLIN
 	pfd.revents = 0
 	pfdP := uintptr(pfd.getPointer())
-
 	rxIndex := 0
 	rf := zs.rxFrames[rxIndex]
 	for {
 		for ; rf.rxReady(); rf = zs.rxFrames[rxIndex] {
 			f := Frame(rf.raw[rf.macStart():])
+			if zs.debug {
+				rf.printRxStatus()
+			}
 			fx(&f, rf.tpLen())
 			rf.rxSet()
 			rxIndex = (rxIndex + 1) % zs.frameNum
@@ -260,13 +269,30 @@ func (zs *ZSocket) WriteCopy(buf []byte, l int, copyFx func(dst, srcf []byte, l 
 		return zs.txError
 	}
 	tx := <-zs.txChan
+	if zs.debug {
+		fmt.Printf("Before Write - ")
+		tx.printRxStatus()
+	}
 	tx.setTpLen(l)
 	tx.setTpSnapLen(l)
 	copyFx(tx.txStart, buf, l)
 	zs.txWriteLock.RLock()
-	tx.txSet()
+	tx.txSet(zs.txLossEnabled)
 	atomic.AddUint32(&zs.txWritten, 1)
 	zs.txWriteLock.RUnlock()
+	if !zs.txLossEnabled {
+		defer atomic.AddInt32(&tx.mb, -1)
+		for host.long(tx.raw[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) != 0 {
+			runtime.Gosched()
+		}
+		if zs.debug {
+			fmt.Printf("After Write - ")
+			tx.printRxStatus()
+		}
+		if host.long(tx.raw[0:_LONG_SIZE])&_TP_STATUS_WRONG_FORMAT == _TP_STATUS_WRONG_FORMAT {
+			return fmt.Errorf("packet has wrong format")
+		}
+	}
 	return nil
 }
 
@@ -410,27 +436,91 @@ func (rf *ringFrame) rxReady() bool {
 func (rf *ringFrame) rxSet() {
 	host.putLong(rf.raw[0:_LONG_SIZE], uint64(_TP_STATUS_KERNEL))
 	// this acts as a memory barrier
-	atomic.CompareAndSwapInt32(&rf.mb, 1, 0)
+	atomic.AddInt32(&rf.mb, -1)
 }
 
 func (rf *ringFrame) txReady() bool {
 	return host.long(rf.raw[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0 && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
 }
 
-func (rf *ringFrame) txSet() {
+func (rf *ringFrame) txSet(setMB bool) {
 	host.putLong(rf.raw[0:_LONG_SIZE], uint64(_TP_STATUS_SEND_REQUEST))
 	// this acts as a memory barrier
-	atomic.CompareAndSwapInt32(&rf.mb, 1, 0)
+	if setMB {
+		atomic.AddInt32(&rf.mb, -1)
+	}
+}
+
+func (rf *ringFrame) printRxStatus() {
+	s := host.long(rf.raw[0:_LONG_SIZE])
+	fmt.Printf("RX STATUS :")
+	if s == 0 {
+		fmt.Printf(" Kernel")
+	}
+	if _TP_STATUS_USER&s > 0 {
+		fmt.Printf(" User")
+	}
+	if _TP_STATUS_COPY&s > 0 {
+		fmt.Printf(" Copy")
+	}
+	if _TP_STATUS_LOSING&s > 0 {
+		fmt.Printf(" Losing")
+	}
+	if _TP_STATUS_CSUMNOTREADY&s > 0 {
+		fmt.Printf(" CSUM-NotReady")
+	}
+	if _TP_STATUS_VLAN_VALID&s > 0 {
+		fmt.Printf("VlanValid")
+	}
+	if _TP_STATUS_BLK_TMO&s > 0 {
+		fmt.Printf("BlkTMO")
+	}
+	if _TP_STATUS_VLAN_TPID_VALID&s > 0 {
+		fmt.Printf("VlanTPIDValid")
+	}
+	if _TP_STATUS_CSUM_VALID&s > 0 {
+		fmt.Printf("CSUM-Valid")
+	}
+	rf.printRxTxStatus(s)
+	fmt.Printf("\n")
+}
+
+func (rf *ringFrame) printTxStatus() {
+	s := host.long(rf.raw[0:_LONG_SIZE])
+	fmt.Printf("TX STATUS :")
+	if s == 0 {
+		fmt.Printf(" Available")
+	}
+	if s&_TP_STATUS_SEND_REQUEST > 0 {
+		fmt.Printf(" SendRequest")
+	}
+	if s&_TP_STATUS_SENDING > 0 {
+		fmt.Printf(" Sending")
+	}
+	if s&_TP_STATUS_WRONG_FORMAT > 0 {
+		fmt.Printf(" WrongFormat")
+	}
+	rf.printRxTxStatus(s)
+	fmt.Printf("\n")
+}
+
+func (rf *ringFrame) printRxTxStatus(s uint64) {
+	if s&_TP_STATUS_TS_SOFTWARE > 0 {
+		fmt.Printf(" Software")
+	}
+	if s&_TP_STATUS_TS_RAW_HARDWARE > 0 {
+		fmt.Printf(" Hardware")
+	}
 }
 
 // A ReadWrite lock that gives
 // absolutely priority to the writer
 //
-// THIS LOCK SHOULD NOT GET COPIED
+// THIS LOCK SHOULD NOT BE COPIED OR REUSED
 // it assumes only one writer will call
 // Lock at a time. This works for its
-// use case in this codebase, but won't
-// for others
+// use case in this codebase, but is
+// unlikely a good fit for others
 type fastRWLock struct {
 	rwLock   *sync.RWMutex
 	writting int32
