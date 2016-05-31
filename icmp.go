@@ -141,12 +141,12 @@ func (p ICMP_P) String(frameLen int) string {
 	typ := p.Type()
 	pay, _ := p.Payload()
 	ps := pay.String(typ)
-	s := fmt.Sprintf("\t\tFLen         : %d\n", frameLen) +
+	s := fmt.Sprintf("\t\tICMP Len     : %d\n", frameLen) +
 		fmt.Sprintf("\t\tType         : %s\n", typ) +
 		fmt.Sprintf("\t\tCode         : %s\n", p.Code().String(typ)) +
 		fmt.Sprintf("\t\tChecksum     : %02x\n", p.Checksum()) +
 		fmt.Sprintf("\t\tCalcChecksum : %02x\n", p.CalculateChecksum(frameLen))
-	if len(pay) > 0 {
+	if len(ps) > 0 {
 		s += fmt.Sprintf("\t\tPayload      :\n%s", ps)
 	}
 	return s
@@ -183,9 +183,6 @@ func (p ICMP_P) CalculateChecksum(frameLen int) uint16 {
 		cs = (cs & 0xffff) + (cs >> 16)
 	}
 	csum := ^uint16(cs)
-	if csum == 0x00 {
-		csum = 0xffff
-	}
 	return hostToNetwork.htonsfs(csum)
 }
 

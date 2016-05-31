@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	ENABLE_RX    = 1 << 0
-	ENABLE_TX    = 1 << 1
-	ENABLE_LOSS  = 1 << 2
-	ENABLE_DEBUG = 1 << 3
+	ENABLE_RX   = 1 << 0
+	ENABLE_TX   = 1 << 1
+	ENABLE_LOSS = 1 << 2
 )
 
 const (
@@ -115,7 +114,6 @@ type ZSocket struct {
 	frameSize     int
 	rxEnabled     bool
 	txEnabled     bool
-	debug         bool
 	txLossEnabled bool
 	txChan        chan *ringFrame
 	txFrameSize   int
@@ -147,7 +145,6 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 	zs.rxEnabled = options&ENABLE_RX == ENABLE_RX
 	zs.txEnabled = options&ENABLE_TX == ENABLE_TX
 	zs.txLossEnabled = options&ENABLE_LOSS == ENABLE_LOSS
-	zs.debug = options&ENABLE_DEBUG == ENABLE_DEBUG
 
 	if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_VERSION, _TPACKET_V1); err != nil {
 		return nil, err
@@ -240,9 +237,9 @@ func (zs *ZSocket) Listen(fx func(*Frame, int)) error {
 	for {
 		for ; rf.rxReady(); rf = zs.rxFrames[rxIndex] {
 			f := Frame(rf.raw[rf.macStart():])
-			if zs.debug {
-				rf.printRxStatus()
-			}
+			// if DEBUG {
+			// 	f.printRxStatus()
+			// }
 			fx(&f, rf.tpLen())
 			rf.rxSet()
 			rxIndex = (rxIndex + 1) % zs.frameNum
@@ -269,10 +266,10 @@ func (zs *ZSocket) WriteCopy(buf []byte, l int, copyFx func(dst, srcf []byte, l 
 		return zs.txError
 	}
 	tx := <-zs.txChan
-	if zs.debug {
-		fmt.Printf("Before Write - ")
-		tx.printRxStatus()
-	}
+	// if DEBUG {
+	// 	fmt.Printf("Before Write - ")
+	// 	tx.printRxStatus()
+	// }
 	tx.setTpLen(l)
 	tx.setTpSnapLen(l)
 	copyFx(tx.txStart, buf, l)
@@ -285,10 +282,10 @@ func (zs *ZSocket) WriteCopy(buf []byte, l int, copyFx func(dst, srcf []byte, l 
 		for host.long(tx.raw[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) != 0 {
 			runtime.Gosched()
 		}
-		if zs.debug {
-			fmt.Printf("After Write - ")
-			tx.printRxStatus()
-		}
+		// if DEBUG {
+		// 	fmt.Printf("After Write - ")
+		// 	tx.printRxStatus()
+		// }
 		if host.long(tx.raw[0:_LONG_SIZE])&_TP_STATUS_WRONG_FORMAT == _TP_STATUS_WRONG_FORMAT {
 			return fmt.Errorf("packet has wrong format")
 		}
@@ -470,16 +467,16 @@ func (rf *ringFrame) printRxStatus() {
 		fmt.Printf(" CSUM-NotReady")
 	}
 	if _TP_STATUS_VLAN_VALID&s > 0 {
-		fmt.Printf("VlanValid")
+		fmt.Printf(" VlanValid")
 	}
 	if _TP_STATUS_BLK_TMO&s > 0 {
-		fmt.Printf("BlkTMO")
+		fmt.Printf(" BlkTMO")
 	}
 	if _TP_STATUS_VLAN_TPID_VALID&s > 0 {
-		fmt.Printf("VlanTPIDValid")
+		fmt.Printf(" VlanTPIDValid")
 	}
 	if _TP_STATUS_CSUM_VALID&s > 0 {
-		fmt.Printf("CSUM-Valid")
+		fmt.Printf(" CSUM-Valid")
 	}
 	rf.printRxTxStatus(s)
 	fmt.Printf("\n")

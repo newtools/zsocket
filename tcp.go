@@ -58,7 +58,7 @@ func (c TCPControl) String() string {
 type TCP_P []byte
 
 func (t TCP_P) String(frameLen int, srcAddr, destAddr net.IP) string {
-	return fmt.Sprintf("\t\tFLen         : %d\n", frameLen) +
+	return fmt.Sprintf("\t\tTCP Len      : %d\n", frameLen) +
 		fmt.Sprintf("\t\tSource Port  : %d\n", t.SourcePort()) +
 		fmt.Sprintf("\t\tDest Port    : %d\n", t.DestinationPort()) +
 		fmt.Sprintf("\t\tSeq Number   : %d\n", t.SequenceNumber()) +
@@ -135,7 +135,6 @@ func (t TCP_P) Checksum() uint16 {
 }
 
 func (t TCP_P) CalculateChecksum(frameLen int, srcAddr, destAddr net.IP) uint16 {
-	fl := frameLen
 	cs := uint32(host.Uint16(t[0:2])) +
 		uint32(host.Uint16(t[2:4])) +
 		uint32(host.Uint16(t[4:6])) +
@@ -145,49 +144,27 @@ func (t TCP_P) CalculateChecksum(frameLen int, srcAddr, destAddr net.IP) uint16 
 		uint32(host.Uint16(t[12:14])) +
 		uint32(host.Uint16(t[14:16])) +
 		uint32(host.Uint16(t[18:20]))
-	frameLen -= 20
+	fl := frameLen - 20
 	i := 20
-	for ; frameLen > 1; i, frameLen = i+2, frameLen-2 {
+	for ; fl > 1; i, fl = i+2, fl-2 {
 		cs += uint32(host.Uint16(t[i : i+2]))
 		if cs&0x80000000 > 0 {
 			cs = (cs & 0xffff) + (cs >> 16)
 		}
 	}
-	if frameLen > 0 {
+	if fl > 0 {
 		cs += uint32(uint8(t[i]))
 	}
 	cs += uint32(host.Uint16(srcAddr[0:2]))
-	if cs&0x80000000 > 0 {
-		cs = (cs & 0xffff) + (cs >> 16)
-	}
 	cs += uint32(host.Uint16(srcAddr[2:4]))
-	if cs&0x80000000 > 0 {
-		cs = (cs & 0xffff) + (cs >> 16)
-	}
 	cs += uint32(host.Uint16(destAddr[0:2]))
-	if cs&0x80000000 > 0 {
-		cs = (cs & 0xffff) + (cs >> 16)
-	}
 	cs += uint32(host.Uint16(destAddr[2:4]))
-	if cs&0x80000000 > 0 {
-		cs = (cs & 0xffff) + (cs >> 16)
-	}
 	cs += _PROTO_TCP
-	if cs&0x80000000 > 0 {
-		cs = (cs & 0xffff) + (cs >> 16)
-	}
-	cs += hostToNetwork.htonifi(uint32(fl))
-	if cs&0x80000000 > 0 {
-		cs = (cs & 0xffff) + (cs >> 16)
-	}
+	cs += hostToNetwork.htonifi(uint32(frameLen))
 	for cs>>16 > 0 {
 		cs = (cs & 0xffff) + (cs >> 16)
 	}
-	csum := ^uint16(cs)
-	if csum == 0x00 {
-		csum = 0xffff
-	}
-	return hostToNetwork.htonsfs(csum)
+	return hostToNetwork.htonsfs(^uint16(cs))
 }
 
 func (t TCP_P) SetChecksum(v uint16) {

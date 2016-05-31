@@ -148,7 +148,7 @@ const (
 type Frame []byte
 
 func (f *Frame) String(l int) string {
-	return fmt.Sprintf("Frame Len  : %d\n", l) +
+	return fmt.Sprintf("Mac Len    : %d\n", l) +
 		fmt.Sprintf("MAC Source : %s\n", f.MACSource()) +
 		fmt.Sprintf("MAC Dest   : %s\n", f.MACDestination()) +
 		fmt.Sprintf("MAC Type   : %s\n", f.MACEthertype()) +

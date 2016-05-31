@@ -44,7 +44,7 @@ func (p IPProtocol) String() string {
 type IPv4_P []byte
 
 func (i IPv4_P) String(frameLen int) string {
-	return fmt.Sprintf("\tFLen     : %d\n", frameLen) +
+	return fmt.Sprintf("\tIP Len   : %d\n", frameLen) +
 		fmt.Sprintf("\tVersion  : %d\n", i.Version()) +
 		fmt.Sprintf("\tIHL      : %d\n", i.IHL()) +
 		fmt.Sprintf("\tLength   : %d\n", i.Length()) +
@@ -141,11 +141,7 @@ func (i IPv4_P) CalculateChecksum() uint16 {
 	for cs>>16 > 0 {
 		cs = (cs & 0xffff) + (cs >> 16)
 	}
-	csum := ^uint16(cs)
-	if csum == 0x00 {
-		csum = 0xffff
-	}
-	return csum
+	return ^uint16(cs)
 }
 
 func (i IPv4_P) PacketCorrupt() bool {
