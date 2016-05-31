@@ -14,8 +14,11 @@ const (
 	_CHAR_SIZE  = C.CHAR_SIZE
 )
 
-var hostToNetwork shton
-var host shost
+var (
+	hostToNetwork      shton
+	host               shost
+	hostEndianLogicSet bool = false
+)
 
 type shton struct {
 	htonShortConv
@@ -50,11 +53,13 @@ type htonShortConv interface {
 	ntohs([]byte) uint16
 	putntohs([]byte, uint16)
 	htons([]byte) uint16
+	htonsfs(uint16) uint16
 	puthtons([]byte, uint16)
 }
 
 type htonIntConv interface {
 	ntohi([]byte) uint32
+	htonifi(uint32) uint32
 }
 
 type htonLongConv interface {
@@ -81,6 +86,9 @@ func init() {
 	hostToNetwork.htonIntConv = &leIntHtonConv{}
 	hostToNetwork.htonShortConv = &leShortHtonConv{}
 	hostToNetwork.htonLongConv = &leLongHtonConv{}
+	hostEndianLogicSet = true
+
+	_PROTO_TCP = hostToNetwork.htonifi(uint32(TCP))
 }
 
 type leLong32Conv struct{}
@@ -146,6 +154,11 @@ func (l *leShortHtonConv) htons(b []byte) uint16 {
 	return binary.LittleEndian.Uint16(b)
 }
 
+func (l *leShortHtonConv) htonsfs(v uint16) uint16 {
+	return (v&0xff)<<8 |
+		(v&0xff00)>>8
+}
+
 func (l *leShortHtonConv) puthtons(b []byte, v uint16) {
 	binary.LittleEndian.PutUint16(b, v)
 }
@@ -154,6 +167,13 @@ type leIntHtonConv struct{}
 
 func (l *leIntHtonConv) ntohi(b []byte) uint32 {
 	return binary.BigEndian.Uint32(b)
+}
+
+func (l *leIntHtonConv) htonifi(v uint32) uint32 {
+	return (v&0xff)<<24 |
+		(v&0xff00)<<8 |
+		(v&0xff0000)>>8 |
+		(v&0xff000000)>>24
 }
 
 type leLongHtonConv struct{}

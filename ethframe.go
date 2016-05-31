@@ -147,19 +147,12 @@ const (
 
 type Frame []byte
 
-func (f *Frame) String() string {
-	return fmt.Sprintf("MAC Source : %s\n", f.MACSource()) +
-		fmt.Sprintf("MAC Dest   : %s\n", f.MACDestination()) +
-		fmt.Sprintf("MAC Type   : %s\n", f.MACEthertype()) +
-		f.GetPayString()
-}
-
-func (f *Frame) StringWithLen(l int) string {
+func (f *Frame) String(l int) string {
 	return fmt.Sprintf("Frame Len  : %d\n", l) +
 		fmt.Sprintf("MAC Source : %s\n", f.MACSource()) +
 		fmt.Sprintf("MAC Dest   : %s\n", f.MACDestination()) +
 		fmt.Sprintf("MAC Type   : %s\n", f.MACEthertype()) +
-		f.GetPayString()
+		f.GetPayString(l)
 }
 
 func (f *Frame) MACSource() net.HardwareAddr {
@@ -193,16 +186,19 @@ func (f *Frame) MACEthertype() EthType {
 	return EthType{(*f)[pos], (*f)[pos+1]}
 }
 
-func (f *Frame) MACPayload() []byte {
-	return (*f)[12+f.MACTagging()+2:]
+func (f *Frame) MACPayload() ([]byte, int) {
+	off := 12 + int(f.MACTagging()) + 2
+	return (*f)[off:], off
 }
 
-func (f *Frame) GetPayString() string {
+func (f *Frame) GetPayString(frameLen int) string {
+	p, off := f.MACPayload()
+	frameLen -= off
 	switch f.MACEthertype() {
 	case ARP:
-		return ARP_P(f.MACPayload()).String()
+		return ARP_P(p).String()
 	case IPv4:
-		return IPv4_P(f.MACPayload()).String()
+		return IPv4_P(p).String(frameLen)
 	default:
 		return "unknown eth payload...\n"
 	}

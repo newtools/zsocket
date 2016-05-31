@@ -137,15 +137,17 @@ func (i ICMPCode) String(typ ICMPType) string {
 
 type ICMP_P []byte
 
-func (p ICMP_P) String() string {
+func (p ICMP_P) String(frameLen int) string {
 	typ := p.Type()
-	pay := p.Payload().String(typ)
-	s := fmt.Sprintf("\t\tType         : %s\n", typ) +
+	pay, _ := p.Payload()
+	ps := pay.String(typ)
+	s := fmt.Sprintf("\t\tFLen         : %d\n", frameLen) +
+		fmt.Sprintf("\t\tType         : %s\n", typ) +
 		fmt.Sprintf("\t\tCode         : %s\n", p.Code().String(typ)) +
 		fmt.Sprintf("\t\tChecksum     : %02x\n", p.Checksum()) +
-		fmt.Sprintf("\t\tCalcChecksum : %02x\n", p.CalculateChecksum())
+		fmt.Sprintf("\t\tCalcChecksum : %02x\n", p.CalculateChecksum(frameLen))
 	if len(pay) > 0 {
-		s += fmt.Sprintf("\t\tPayload      :\n%s", pay)
+		s += fmt.Sprintf("\t\tPayload      :\n%s", ps)
 	}
 	return s
 }
@@ -162,20 +164,33 @@ func (p ICMP_P) Checksum() uint16 {
 	return hostToNetwork.ntohs(p[2:4])
 }
 
-func (p ICMP_P) CalculateChecksum() uint16 {
-	cs := uint32(hostToNetwork.htons(p[0:2])) +
-		uint32(hostToNetwork.htons(p[4:6])) +
-		uint32(hostToNetwork.htons(p[6:8]))
-	csum := uint16(cs&0xffff) + uint16(cs>>16)
-	csum = ^csum
+func (p ICMP_P) CalculateChecksum(frameLen int) uint16 {
+	cs := uint32(host.Uint16(p[0:2])) +
+		uint32(host.Uint16(p[4:6])) +
+		uint32(host.Uint16(p[6:8]))
+	frameLen -= 8
+	i := 8
+	for ; frameLen > 1; i, frameLen = i+2, frameLen-2 {
+		cs += uint32(host.Uint16(p[i : i+2]))
+		if cs&0x80000000 > 0 {
+			cs = (cs & 0xffff) + (cs >> 16)
+		}
+	}
+	if frameLen > 0 {
+		cs += uint32(uint8(p[i]))
+	}
+	for cs>>16 > 0 {
+		cs = (cs & 0xffff) + (cs >> 16)
+	}
+	csum := ^uint16(cs)
 	if csum == 0x00 {
 		csum = 0xffff
 	}
-	return csum
+	return hostToNetwork.htonsfs(csum)
 }
 
-func (p ICMP_P) Payload() ICMP_Payload {
-	return ICMP_Payload(p[4:])
+func (p ICMP_P) Payload() (ICMP_Payload, int) {
+	return ICMP_Payload(p[4:]), 4
 }
 
 type ICMP_Payload []byte

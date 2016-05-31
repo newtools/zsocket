@@ -43,8 +43,9 @@ func (p IPProtocol) String() string {
 
 type IPv4_P []byte
 
-func (i IPv4_P) String() string {
-	return fmt.Sprintf("\tVersion  : %d\n", i.Version()) +
+func (i IPv4_P) String(frameLen int) string {
+	return fmt.Sprintf("\tFLen     : %d\n", frameLen) +
+		fmt.Sprintf("\tVersion  : %d\n", i.Version()) +
 		fmt.Sprintf("\tIHL      : %d\n", i.IHL()) +
 		fmt.Sprintf("\tLength   : %d\n", i.Length()) +
 		fmt.Sprintf("\tId       : %d\n", i.Id()) +
@@ -56,15 +57,17 @@ func (i IPv4_P) String() string {
 		fmt.Sprintf("\tCalcsum  : %02x\n", i.CalculateChecksum()) +
 		fmt.Sprintf("\tSourceIP : %s\n", i.SourceIP()) +
 		fmt.Sprintf("\tDestIP   : %s\n", i.DestinationIP()) +
-		i.PayloadString()
+		i.PayloadString(frameLen)
 }
 
-func (i IPv4_P) PayloadString() string {
+func (i IPv4_P) PayloadString(frameLen int) string {
+	p, off := i.Payload()
+	frameLen -= off
 	switch i.Protocol() {
 	case TCP:
-		return TCP_P(i.Payload()).String()
+		return TCP_P(p).String(frameLen, i.SourceIP(), i.DestinationIP())
 	case ICMP:
-		return ICMP_P(i.Payload()).String()
+		return ICMP_P(p).String(frameLen)
 	default:
 		return "\tunrecognized ip protocol...\n"
 	}
@@ -119,24 +122,26 @@ func (i IPv4_P) Checksum() uint16 {
 }
 
 func (i IPv4_P) CalculateChecksum() uint16 {
-	cs := uint32(hostToNetwork.htons(i[0:2])) +
-		uint32(hostToNetwork.htons(i[2:4])) +
-		uint32(hostToNetwork.htons(i[4:6])) +
-		uint32(hostToNetwork.htons(i[6:8])) +
-		uint32(hostToNetwork.htons(i[8:10])) +
-		uint32(hostToNetwork.htons(i[12:14])) +
-		uint32(hostToNetwork.htons(i[14:16])) +
-		uint32(hostToNetwork.htons(i[16:18])) +
-		uint32(hostToNetwork.htons(i[18:20]))
+	cs := uint32(host.Uint16(i[0:2])) +
+		uint32(host.Uint16(i[2:4])) +
+		uint32(host.Uint16(i[4:6])) +
+		uint32(host.Uint16(i[6:8])) +
+		uint32(host.Uint16(i[8:10])) +
+		uint32(host.Uint16(i[12:14])) +
+		uint32(host.Uint16(i[14:16])) +
+		uint32(host.Uint16(i[16:18])) +
+		uint32(host.Uint16(i[18:20]))
 	index := 20
 	for t, l := 0, int(i.IHL()-5); t < l; t++ {
-		cs += uint32(hostToNetwork.htons(i[index : index+2]))
+		cs += uint32(host.Uint16(i[index : index+2]))
 		index += 2
-		cs += uint32(hostToNetwork.htons(i[index : index+2]))
+		cs += uint32(host.Uint16(i[index : index+2]))
 		index += 2
 	}
-	csum := uint16(cs&0xffff) + uint16(cs>>16)
-	csum = ^csum
+	for cs>>16 > 0 {
+		cs = (cs & 0xffff) + (cs >> 16)
+	}
+	csum := ^uint16(cs)
 	if csum == 0x00 {
 		csum = 0xffff
 	}
@@ -155,6 +160,7 @@ func (i IPv4_P) DestinationIP() net.IP {
 	return net.IP(i[16:20])
 }
 
-func (i IPv4_P) Payload() []byte {
-	return i[i.IHL()*4:]
+func (i IPv4_P) Payload() ([]byte, int) {
+	off := int(i.IHL() * 4)
+	return i[off:], off
 }
