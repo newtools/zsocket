@@ -1,8 +1,10 @@
-package zsocket
+package nettypes
 
 import (
 	"fmt"
 	"net"
+
+	"github.com/nathanjsweet/zsocket/inet"
 )
 
 type ICMPType uint8
@@ -161,17 +163,17 @@ func (p ICMP_P) Code() ICMPCode {
 }
 
 func (p ICMP_P) Checksum() uint16 {
-	return hostToNetwork.ntohs(p[2:4])
+	return inet.NToHS(p[2:4])
 }
 
 func (p ICMP_P) CalculateChecksum(frameLen int) uint16 {
-	cs := uint32(host.Uint16(p[0:2])) +
-		uint32(host.Uint16(p[4:6])) +
-		uint32(host.Uint16(p[6:8]))
+	cs := uint32(inet.HostByteOrder.Uint16(p[0:2])) +
+		uint32(inet.HostByteOrder.Uint16(p[4:6])) +
+		uint32(inet.HostByteOrder.Uint16(p[6:8]))
 	frameLen -= 8
 	i := 8
 	for ; frameLen > 1; i, frameLen = i+2, frameLen-2 {
-		cs += uint32(host.Uint16(p[i : i+2]))
+		cs += uint32(inet.HostByteOrder.Uint16(p[i : i+2]))
 		if cs&0x80000000 > 0 {
 			cs = (cs & 0xffff) + (cs >> 16)
 		}
@@ -183,7 +185,7 @@ func (p ICMP_P) CalculateChecksum(frameLen int) uint16 {
 		cs = (cs & 0xffff) + (cs >> 16)
 	}
 	csum := ^uint16(cs)
-	return hostToNetwork.htonsfs(csum)
+	return inet.HToNSFS(csum)
 }
 
 func (p ICMP_P) Payload() (ICMP_Payload, int) {
@@ -199,11 +201,11 @@ func (pay ICMP_Payload) String(typ ICMPType) string {
 	case Timestamp:
 		fallthrough
 	case TimestampReply:
-		return fmt.Sprintf("\t\t\tIdentifier  : %d", hostToNetwork.ntohi(pay[4:6])) +
-			fmt.Sprintf("\t\t\tSeq Number  : %d", hostToNetwork.ntohi(pay[6:8])) +
-			fmt.Sprintf("\t\t\tOrigin TS   : %d", hostToNetwork.ntohi(pay[8:12])) +
-			fmt.Sprintf("\t\t\tReceive TS  : %d", hostToNetwork.ntohi(pay[12:16])) +
-			fmt.Sprintf("\t\t\tTransmit TS : %d", hostToNetwork.ntohi(pay[16:20]))
+		return fmt.Sprintf("\t\t\tIdentifier  : %d", inet.NToHI(pay[4:6])) +
+			fmt.Sprintf("\t\t\tSeq Number  : %d", inet.NToHI(pay[6:8])) +
+			fmt.Sprintf("\t\t\tOrigin TS   : %d", inet.NToHI(pay[8:12])) +
+			fmt.Sprintf("\t\t\tReceive TS  : %d", inet.NToHI(pay[12:16])) +
+			fmt.Sprintf("\t\t\tTransmit TS : %d", inet.NToHI(pay[16:20]))
 	}
 	return ""
 }

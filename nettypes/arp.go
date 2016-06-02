@@ -1,8 +1,10 @@
-package zsocket
+package nettypes
 
 import (
 	"fmt"
 	"net"
+
+	"github.com/nathanjsweet/zsocket/inet"
 )
 
 type ARP_P []byte
@@ -20,11 +22,11 @@ func (a ARP_P) String() string {
 }
 
 func (a ARP_P) HardwareType() uint16 {
-	return hostToNetwork.ntohs(a[0:2])
+	return inet.NToHS(a[0:2])
 }
 
 func (a ARP_P) ProtocolType() uint16 {
-	return hostToNetwork.ntohs(a[2:4])
+	return inet.NToHS(a[2:4])
 }
 
 func (a ARP_P) Hlen() uint8 {
@@ -36,7 +38,7 @@ func (a ARP_P) Plen() uint8 {
 }
 
 func (a ARP_P) Operation() uint16 {
-	return hostToNetwork.ntohs(a[6:8])
+	return inet.NToHS(a[6:8])
 }
 
 func (a ARP_P) SHA() net.HardwareAddr {

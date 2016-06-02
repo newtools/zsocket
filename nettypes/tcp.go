@@ -1,8 +1,10 @@
-package zsocket
+package nettypes
 
 import (
 	"fmt"
 	"net"
+
+	"github.com/nathanjsweet/zsocket/inet"
 )
 
 type TCPControl uint16
@@ -72,19 +74,19 @@ func (t TCP_P) String(frameLen int, srcAddr, destAddr net.IP) string {
 }
 
 func (t TCP_P) SourcePort() uint16 {
-	return hostToNetwork.ntohs(t[0:2])
+	return inet.NToHS(t[0:2])
 }
 
 func (t TCP_P) DestinationPort() uint16 {
-	return hostToNetwork.ntohs(t[2:4])
+	return inet.NToHS(t[2:4])
 }
 
 func (t TCP_P) SequenceNumber() uint32 {
-	return hostToNetwork.ntohi(t[4:8])
+	return inet.NToHI(t[4:8])
 }
 
 func (t TCP_P) AckNumber() uint32 {
-	return hostToNetwork.ntohi(t[8:12])
+	return inet.NToHI(t[8:12])
 }
 
 func (t TCP_P) DataOffset() uint8 {
@@ -127,27 +129,27 @@ func (t TCP_P) Controls() TCPControl {
 }
 
 func (t TCP_P) WindowSize() uint16 {
-	return hostToNetwork.ntohs(t[14:16])
+	return inet.NToHS(t[14:16])
 }
 
 func (t TCP_P) Checksum() uint16 {
-	return hostToNetwork.ntohs(t[16:18])
+	return inet.NToHS(t[16:18])
 }
 
 func (t TCP_P) CalculateChecksum(frameLen int, srcAddr, destAddr net.IP) uint16 {
-	cs := uint32(host.Uint16(t[0:2])) +
-		uint32(host.Uint16(t[2:4])) +
-		uint32(host.Uint16(t[4:6])) +
-		uint32(host.Uint16(t[6:8])) +
-		uint32(host.Uint16(t[8:10])) +
-		uint32(host.Uint16(t[10:12])) +
-		uint32(host.Uint16(t[12:14])) +
-		uint32(host.Uint16(t[14:16])) +
-		uint32(host.Uint16(t[18:20]))
+	cs := uint32(inet.HostByteOrder.Uint16(t[0:2])) +
+		uint32(inet.HostByteOrder.Uint16(t[2:4])) +
+		uint32(inet.HostByteOrder.Uint16(t[4:6])) +
+		uint32(inet.HostByteOrder.Uint16(t[6:8])) +
+		uint32(inet.HostByteOrder.Uint16(t[8:10])) +
+		uint32(inet.HostByteOrder.Uint16(t[10:12])) +
+		uint32(inet.HostByteOrder.Uint16(t[12:14])) +
+		uint32(inet.HostByteOrder.Uint16(t[14:16])) +
+		uint32(inet.HostByteOrder.Uint16(t[18:20]))
 	fl := frameLen - 20
 	i := 20
 	for ; fl > 1; i, fl = i+2, fl-2 {
-		cs += uint32(host.Uint16(t[i : i+2]))
+		cs += uint32(inet.HostByteOrder.Uint16(t[i : i+2]))
 		if cs&0x80000000 > 0 {
 			cs = (cs & 0xffff) + (cs >> 16)
 		}
@@ -155,24 +157,24 @@ func (t TCP_P) CalculateChecksum(frameLen int, srcAddr, destAddr net.IP) uint16 
 	if fl > 0 {
 		cs += uint32(uint8(t[i]))
 	}
-	cs += uint32(host.Uint16(srcAddr[0:2]))
-	cs += uint32(host.Uint16(srcAddr[2:4]))
-	cs += uint32(host.Uint16(destAddr[0:2]))
-	cs += uint32(host.Uint16(destAddr[2:4]))
+	cs += uint32(inet.HostByteOrder.Uint16(srcAddr[0:2]))
+	cs += uint32(inet.HostByteOrder.Uint16(srcAddr[2:4]))
+	cs += uint32(inet.HostByteOrder.Uint16(destAddr[0:2]))
+	cs += uint32(inet.HostByteOrder.Uint16(destAddr[2:4]))
 	cs += _PROTO_TCP
-	cs += hostToNetwork.htonifi(uint32(frameLen))
+	cs += inet.HToNIFI(uint32(frameLen))
 	for cs>>16 > 0 {
 		cs = (cs & 0xffff) + (cs >> 16)
 	}
-	return hostToNetwork.htonsfs(^uint16(cs))
+	return inet.HToNSFS(^uint16(cs))
 }
 
 func (t TCP_P) SetChecksum(v uint16) {
-	hostToNetwork.putntohs(t[16:18], v)
+	inet.PutNToHS(t[16:18], v)
 }
 
 func (t TCP_P) UrgPointer() uint16 {
-	return hostToNetwork.ntohs(t[18:20])
+	return inet.NToHS(t[18:20])
 }
 
 func (t TCP_P) Payload() ([]byte, int) {

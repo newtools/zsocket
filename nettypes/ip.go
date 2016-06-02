@@ -1,8 +1,10 @@
-package zsocket
+package nettypes
 
 import (
 	"fmt"
 	"net"
+
+	"github.com/nathanjsweet/zsocket/inet"
 )
 
 type IPProtocol uint8
@@ -82,11 +84,11 @@ func (i IPv4_P) IHL() uint8 {
 }
 
 func (i IPv4_P) Length() uint16 {
-	return hostToNetwork.ntohs(i[2:4])
+	return inet.NToHS(i[2:4])
 }
 
 func (i IPv4_P) Id() uint16 {
-	return hostToNetwork.ntohs(i[4:6])
+	return inet.NToHS(i[4:6])
 }
 
 func (i IPv4_P) Flags() uint8 {
@@ -106,7 +108,7 @@ func (i IPv4_P) FlagsString() string {
 }
 
 func (i IPv4_P) FragmentOffset() uint16 {
-	return hostToNetwork.ntohs([]byte{i[6] & 0x1f, i[7]})
+	return inet.NToHS([]byte{i[6] & 0x1f, i[7]})
 }
 
 func (i IPv4_P) TTLHopCount() uint8 {
@@ -118,24 +120,24 @@ func (i IPv4_P) Protocol() IPProtocol {
 }
 
 func (i IPv4_P) Checksum() uint16 {
-	return hostToNetwork.htons(i[10:12])
+	return inet.NToHS(i[10:12])
 }
 
 func (i IPv4_P) CalculateChecksum() uint16 {
-	cs := uint32(host.Uint16(i[0:2])) +
-		uint32(host.Uint16(i[2:4])) +
-		uint32(host.Uint16(i[4:6])) +
-		uint32(host.Uint16(i[6:8])) +
-		uint32(host.Uint16(i[8:10])) +
-		uint32(host.Uint16(i[12:14])) +
-		uint32(host.Uint16(i[14:16])) +
-		uint32(host.Uint16(i[16:18])) +
-		uint32(host.Uint16(i[18:20]))
+	cs := uint32(inet.HostByteOrder.Uint16(i[0:2])) +
+		uint32(inet.HostByteOrder.Uint16(i[2:4])) +
+		uint32(inet.HostByteOrder.Uint16(i[4:6])) +
+		uint32(inet.HostByteOrder.Uint16(i[6:8])) +
+		uint32(inet.HostByteOrder.Uint16(i[8:10])) +
+		uint32(inet.HostByteOrder.Uint16(i[12:14])) +
+		uint32(inet.HostByteOrder.Uint16(i[14:16])) +
+		uint32(inet.HostByteOrder.Uint16(i[16:18])) +
+		uint32(inet.HostByteOrder.Uint16(i[18:20]))
 	index := 20
 	for t, l := 0, int(i.IHL()-5); t < l; t++ {
-		cs += uint32(host.Uint16(i[index : index+2]))
+		cs += uint32(inet.HostByteOrder.Uint16(i[index : index+2]))
 		index += 2
-		cs += uint32(host.Uint16(i[index : index+2]))
+		cs += uint32(inet.HostByteOrder.Uint16(i[index : index+2]))
 		index += 2
 	}
 	for cs>>16 > 0 {

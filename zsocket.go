@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"syscall"
 	"unsafe"
+
+	"github.com/nathanjsweet/zsocket/inet"
+	"github.com/nathanjsweet/zsocket/nettypes"
 )
 
 const (
@@ -72,16 +75,16 @@ var (
 //         unsigned int    tp_usec;
 //};
 func init() {
-	_TP_LEN_START = _LONG_SIZE
-	_TP_LEN_STOP = _TP_LEN_START + _INT_SIZE
+	_TP_LEN_START = inet.HOST_LONG_SIZE
+	_TP_LEN_STOP = _TP_LEN_START + inet.HOST_INT_SIZE
 
 	_TP_SNAPLEN_START = _TP_LEN_STOP
-	_TP_SNAPLEN_STOP = _TP_SNAPLEN_START + _INT_SIZE
+	_TP_SNAPLEN_STOP = _TP_SNAPLEN_START + inet.HOST_INT_SIZE
 
 	_TP_MAC_START = _TP_SNAPLEN_STOP
-	_TP_MAC_STOP = _TP_MAC_START + _SHORT_SIZE
+	_TP_MAC_STOP = _TP_MAC_START + inet.HOST_SHORT_SIZE
 
-	_TX_START = _TP_MAC_STOP + _SHORT_SIZE + _INT_SIZE + _INT_SIZE
+	_TX_START = _TP_MAC_STOP + inet.HOST_SHORT_SIZE + inet.HOST_INT_SIZE + inet.HOST_INT_SIZE
 	r := _TX_START % _TPACKET_ALIGNMENT
 	if r > 0 {
 		_TX_START += (_TPACKET_ALIGNMENT - r)
@@ -102,7 +105,7 @@ func errnoErr(e syscall.Errno) error {
 	return e
 }
 
-func copyFx(dst, src []byte, len int) {
+func copyFx(dst, src []byte, len uint32) {
 	copy(dst, src)
 }
 
@@ -116,7 +119,7 @@ type ZSocket struct {
 	txEnabled     bool
 	txLossEnabled bool
 	txChan        chan *ringFrame
-	txFrameSize   int
+	txFrameSize   uint32
 	txError       error
 	txWriteLock   *fastRWLock
 	txWritten     uint32
@@ -124,10 +127,10 @@ type ZSocket struct {
 	txFrames      []*ringFrame
 }
 
-func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, error) {
+func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSocket, error) {
 	zs := new(ZSocket)
 
-	eT := hostToNetwork.htons(ethType[0:])
+	eT := inet.HToNS(ethType[0:])
 	// in Linux PF_PACKET is actually defined by AF_PACKET.
 	sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(eT))
 	if err != nil {
@@ -203,7 +206,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 	if zs.txEnabled {
 		zs.txWriteLock = &fastRWLock{&sync.RWMutex{}, 0, 0}
 		zs.txChan = make(chan *ringFrame, zs.frameNum+1)
-		zs.txFrameSize = _TX_START + zs.frameSize
+		zs.txFrameSize = uint32(_TX_START + zs.frameSize)
 		for t := 0; t < zs.frameNum; t, i = t+1, i+1 {
 			frLoc = i * zs.frameSize
 			tx := &ringFrame{}
@@ -220,7 +223,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType EthType) (*ZSocket, err
 	return zs, nil
 }
 
-func (zs *ZSocket) Listen(fx func(*Frame, int)) error {
+func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 	if !zs.rxEnabled {
 		return fmt.Errorf("the RX ring is disabled on this socket")
 	}
@@ -236,10 +239,7 @@ func (zs *ZSocket) Listen(fx func(*Frame, int)) error {
 	rf := zs.rxFrames[rxIndex]
 	for {
 		for ; rf.rxReady(); rf = zs.rxFrames[rxIndex] {
-			f := Frame(rf.raw[rf.macStart():])
-			// if DEBUG {
-			// 	f.printRxStatus()
-			// }
+			f := nettypes.Frame(rf.raw[rf.macStart():])
 			fx(&f, rf.tpLen())
 			rf.rxSet()
 			rxIndex = (rxIndex + 1) % zs.frameNum
@@ -251,25 +251,21 @@ func (zs *ZSocket) Listen(fx func(*Frame, int)) error {
 	}
 }
 
-func (zs *ZSocket) Write(buf []byte, l int) error {
+func (zs *ZSocket) Write(buf []byte, l uint32) error {
 	if l > zs.txFrameSize {
 		return fmt.Errorf("the length of the write exceeds the size of the TX frame")
 	}
 	if l < 0 {
-		return zs.WriteCopy(buf, len(buf), copyFx)
+		return zs.WriteCopy(buf, uint32(len(buf)), copyFx)
 	}
 	return zs.WriteCopy(buf[:l], l, copyFx)
 }
 
-func (zs *ZSocket) WriteCopy(buf []byte, l int, copyFx func(dst, srcf []byte, l int)) error {
+func (zs *ZSocket) WriteCopy(buf []byte, l uint32, copyFx func(dst, srcf []byte, l uint32)) error {
 	if zs.txError != nil {
 		return zs.txError
 	}
 	tx := <-zs.txChan
-	// if DEBUG {
-	// 	fmt.Printf("Before Write - ")
-	// 	tx.printRxStatus()
-	// }
 	tx.setTpLen(l)
 	tx.setTpSnapLen(l)
 	copyFx(tx.txStart, buf, l)
@@ -279,14 +275,10 @@ func (zs *ZSocket) WriteCopy(buf []byte, l int, copyFx func(dst, srcf []byte, l 
 	zs.txWriteLock.RUnlock()
 	if !zs.txLossEnabled {
 		defer atomic.AddInt32(&tx.mb, -1)
-		for host.long(tx.raw[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) != 0 {
+		for inet.Long(tx.raw[0:inet.HOST_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) != 0 {
 			runtime.Gosched()
 		}
-		// if DEBUG {
-		// 	fmt.Printf("After Write - ")
-		// 	tx.printRxStatus()
-		// }
-		if host.long(tx.raw[0:_LONG_SIZE])&_TP_STATUS_WRONG_FORMAT == _TP_STATUS_WRONG_FORMAT {
+		if inet.Long(tx.raw[0:inet.HOST_LONG_SIZE])&_TP_STATUS_WRONG_FORMAT == _TP_STATUS_WRONG_FORMAT {
 			return fmt.Errorf("packet has wrong format")
 		}
 	}
@@ -339,7 +331,7 @@ type tpacketReq struct {
 }
 
 func (tr *tpacketReq) getPointer() unsafe.Pointer {
-	if _INT_SIZE == 4 {
+	if inet.HOST_INT_SIZE == 4 {
 		return unsafe.Pointer(&(struct {
 			blockSize,
 			blockNum,
@@ -367,7 +359,7 @@ func (tr *tpacketReq) getPointer() unsafe.Pointer {
 }
 
 func (req *tpacketReq) size() int {
-	return _INT_SIZE * 4
+	return inet.HOST_INT_SIZE * 4
 }
 
 type pollfd struct {
@@ -377,7 +369,7 @@ type pollfd struct {
 }
 
 func (pfd *pollfd) getPointer() unsafe.Pointer {
-	if _INT_SIZE == 4 {
+	if inet.HOST_INT_SIZE == 4 {
 		return unsafe.Pointer(&(struct {
 			fd      int32
 			events  int16
@@ -401,7 +393,7 @@ func (pfd *pollfd) getPointer() unsafe.Pointer {
 }
 
 func (req *pollfd) size() int {
-	return _INT_SIZE + 2*_SHORT_SIZE
+	return inet.HOST_INT_SIZE + 2*inet.HOST_SHORT_SIZE
 }
 
 type ringFrame struct {
@@ -411,37 +403,37 @@ type ringFrame struct {
 }
 
 func (rf *ringFrame) macStart() uint16 {
-	return host.short(rf.raw[_TP_MAC_START:_TP_MAC_STOP])
+	return inet.Short(rf.raw[_TP_MAC_START:_TP_MAC_STOP])
 }
 
-func (rf *ringFrame) tpLen() int {
-	return host.int(rf.raw[_TP_LEN_START:_TP_LEN_STOP])
+func (rf *ringFrame) tpLen() uint32 {
+	return inet.Int(rf.raw[_TP_LEN_START:_TP_LEN_STOP])
 }
 
-func (rf *ringFrame) setTpLen(v int) {
-	host.putInt(rf.raw[_TP_LEN_START:_TP_LEN_STOP], v)
+func (rf *ringFrame) setTpLen(v uint32) {
+	inet.PutInt(rf.raw[_TP_LEN_START:_TP_LEN_STOP], v)
 }
 
-func (rf *ringFrame) setTpSnapLen(v int) {
-	host.putInt(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP], v)
+func (rf *ringFrame) setTpSnapLen(v uint32) {
+	inet.PutInt(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP], v)
 }
 
 func (rf *ringFrame) rxReady() bool {
-	return host.long(rf.raw[0:_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
+	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
 }
 
 func (rf *ringFrame) rxSet() {
-	host.putLong(rf.raw[0:_LONG_SIZE], uint64(_TP_STATUS_KERNEL))
+	inet.PutLong(rf.raw[0:inet.HOST_LONG_SIZE], uint64(_TP_STATUS_KERNEL))
 	// this acts as a memory barrier
 	atomic.AddInt32(&rf.mb, -1)
 }
 
 func (rf *ringFrame) txReady() bool {
-	return host.long(rf.raw[0:_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0 && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
+	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0 && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
 }
 
 func (rf *ringFrame) txSet(setMB bool) {
-	host.putLong(rf.raw[0:_LONG_SIZE], uint64(_TP_STATUS_SEND_REQUEST))
+	inet.PutLong(rf.raw[0:inet.HOST_LONG_SIZE], uint64(_TP_STATUS_SEND_REQUEST))
 	// this acts as a memory barrier
 	if setMB {
 		atomic.AddInt32(&rf.mb, -1)
@@ -449,7 +441,7 @@ func (rf *ringFrame) txSet(setMB bool) {
 }
 
 func (rf *ringFrame) printRxStatus() {
-	s := host.long(rf.raw[0:_LONG_SIZE])
+	s := inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])
 	fmt.Printf("RX STATUS :")
 	if s == 0 {
 		fmt.Printf(" Kernel")
@@ -483,7 +475,7 @@ func (rf *ringFrame) printRxStatus() {
 }
 
 func (rf *ringFrame) printTxStatus() {
-	s := host.long(rf.raw[0:_LONG_SIZE])
+	s := inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])
 	fmt.Printf("TX STATUS :")
 	if s == 0 {
 		fmt.Printf(" Available")

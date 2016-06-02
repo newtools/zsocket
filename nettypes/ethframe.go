@@ -1,4 +1,4 @@
-package zsocket
+package nettypes
 
 import (
 	"fmt"
