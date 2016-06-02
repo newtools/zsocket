@@ -170,7 +170,6 @@ func init() {
 
 }
 
-//true = big endian, false = little endian
 func bigEndian() (ret bool) {
 	var i int = 0x1
 	bs := (*[int(unsafe.Sizeof(0))]byte)(unsafe.Pointer(&i))
