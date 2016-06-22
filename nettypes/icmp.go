@@ -139,17 +139,17 @@ func (i ICMPCode) String(typ ICMPType) string {
 
 type ICMP_P []byte
 
-func (p ICMP_P) String(frameLen int) string {
+func (p ICMP_P) String(frameLen uint32, indent int) string {
 	typ := p.Type()
 	pay, _ := p.Payload()
-	ps := pay.String(typ)
-	s := fmt.Sprintf("\t\tICMP Len     : %d\n", frameLen) +
-		fmt.Sprintf("\t\tType         : %s\n", typ) +
-		fmt.Sprintf("\t\tCode         : %s\n", p.Code().String(typ)) +
-		fmt.Sprintf("\t\tChecksum     : %02x\n", p.Checksum()) +
-		fmt.Sprintf("\t\tCalcChecksum : %02x\n", p.CalculateChecksum(frameLen))
+	ps := pay.String(typ, indent)
+	s := fmt.Sprintf(padLeft("ICMP Len     : %d\n", "\t", indent), frameLen) +
+		fmt.Sprintf(padLeft("Type         : %s\n", "\t", indent), typ) +
+		fmt.Sprintf(padLeft("Code         : %s\n", "\t", indent), p.Code().String(typ)) +
+		fmt.Sprintf(padLeft("Checksum     : %02x\n", "\t", indent), p.Checksum()) +
+		fmt.Sprintf(padLeft("CalcChecksum : %02x\n", "\t", indent), p.CalculateChecksum(frameLen))
 	if len(ps) > 0 {
-		s += fmt.Sprintf("\t\tPayload      :\n%s", ps)
+		s += fmt.Sprintf(padLeft("Payload      :\n%s", "\t", indent), ps)
 	}
 	return s
 }
@@ -166,7 +166,7 @@ func (p ICMP_P) Checksum() uint16 {
 	return inet.NToHS(p[2:4])
 }
 
-func (p ICMP_P) CalculateChecksum(frameLen int) uint16 {
+func (p ICMP_P) CalculateChecksum(frameLen uint32) uint16 {
 	cs := uint32(inet.HostByteOrder.Uint16(p[0:2])) +
 		uint32(inet.HostByteOrder.Uint16(p[4:6])) +
 		uint32(inet.HostByteOrder.Uint16(p[6:8]))
@@ -188,24 +188,25 @@ func (p ICMP_P) CalculateChecksum(frameLen int) uint16 {
 	return inet.HToNSFS(csum)
 }
 
-func (p ICMP_P) Payload() (ICMP_Payload, int) {
-	return ICMP_Payload(p[4:]), 4
+func (p ICMP_P) Payload() (ICMP_Payload, uint32) {
+	return ICMP_Payload(p[4:]), uint32(4)
 }
 
 type ICMP_Payload []byte
 
-func (pay ICMP_Payload) String(typ ICMPType) string {
+func (pay ICMP_Payload) String(typ ICMPType, indent int) string {
+	indent++
 	switch typ {
 	case RedirectMessage:
-		return fmt.Sprintf("\t\t\tIP Addr : %s\n", net.IP(pay[4:8]).String())
+		return fmt.Sprintf(padLeft("IP Addr : %s\n", "\t", indent), net.IP(pay[4:8]).String())
 	case Timestamp:
 		fallthrough
 	case TimestampReply:
-		return fmt.Sprintf("\t\t\tIdentifier  : %d", inet.NToHI(pay[4:6])) +
-			fmt.Sprintf("\t\t\tSeq Number  : %d", inet.NToHI(pay[6:8])) +
-			fmt.Sprintf("\t\t\tOrigin TS   : %d", inet.NToHI(pay[8:12])) +
-			fmt.Sprintf("\t\t\tReceive TS  : %d", inet.NToHI(pay[12:16])) +
-			fmt.Sprintf("\t\t\tTransmit TS : %d", inet.NToHI(pay[16:20]))
+		return fmt.Sprintf(padLeft("Identifier  : %d\n", "\t", indent), inet.NToHI(pay[4:6])) +
+			fmt.Sprintf(padLeft("Seq Number  : %d\n", "\t", indent), inet.NToHI(pay[6:8])) +
+			fmt.Sprintf(padLeft("Origin TS   : %d\n", "\t", indent), inet.NToHI(pay[8:12])) +
+			fmt.Sprintf(padLeft("Receive TS  : %d\n", "\t", indent), inet.NToHI(pay[12:16])) +
+			fmt.Sprintf(padLeft("Transmit TS : %d\n", "\t", indent), inet.NToHI(pay[16:20]))
 	}
-	return ""
+	return "\n"
 }

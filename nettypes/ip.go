@@ -45,33 +45,35 @@ func (p IPProtocol) String() string {
 
 type IPv4_P []byte
 
-func (i IPv4_P) String(frameLen int) string {
-	return fmt.Sprintf("\tIP Len   : %d\n", frameLen) +
-		fmt.Sprintf("\tVersion  : %d\n", i.Version()) +
-		fmt.Sprintf("\tIHL      : %d\n", i.IHL()) +
-		fmt.Sprintf("\tLength   : %d\n", i.Length()) +
-		fmt.Sprintf("\tId       : %d\n", i.Id()) +
-		fmt.Sprintf("\tFlags    : %s\n", i.FlagsString()) +
-		fmt.Sprintf("\tFrag Off : %d\n", i.FragmentOffset()) +
-		fmt.Sprintf("\tTTL HC   : %d\n", i.TTLHopCount()) +
-		fmt.Sprintf("\tProtocol : %s\n", i.Protocol()) +
-		fmt.Sprintf("\tChecksum : %02x\n", i.Checksum()) +
-		fmt.Sprintf("\tCalcsum  : %02x\n", i.CalculateChecksum()) +
-		fmt.Sprintf("\tSourceIP : %s\n", i.SourceIP()) +
-		fmt.Sprintf("\tDestIP   : %s\n", i.DestinationIP()) +
-		i.PayloadString(frameLen)
+func (i IPv4_P) String(frameLen uint32, indent int) string {
+	return fmt.Sprintf(padLeft("IP Len   : %d\n", "\t", indent), frameLen) +
+		fmt.Sprintf(padLeft("Version  : %d\n", "\t", indent), i.Version()) +
+		fmt.Sprintf(padLeft("IHL      : %d\n", "\t", indent), i.IHL()) +
+		fmt.Sprintf(padLeft("Length   : %d\n", "\t", indent), i.Length()) +
+		fmt.Sprintf(padLeft("Id       : %d\n", "\t", indent), i.Id()) +
+		fmt.Sprintf(padLeft("Flags    : %s\n", "\t", indent), i.FlagsString()) +
+		fmt.Sprintf(padLeft("Frag Off : %d\n", "\t", indent), i.FragmentOffset()) +
+		fmt.Sprintf(padLeft("TTL HC   : %d\n", "\t", indent), i.TTLHopCount()) +
+		fmt.Sprintf(padLeft("Protocol : %s\n", "\t", indent), i.Protocol()) +
+		fmt.Sprintf(padLeft("Checksum : %02x\n", "\t", indent), i.Checksum()) +
+		fmt.Sprintf(padLeft("Calcsum  : %02x\n", "\t", indent), i.CalculateChecksum()) +
+		fmt.Sprintf(padLeft("SourceIP : %s\n", "\t", indent), i.SourceIP()) +
+		fmt.Sprintf(padLeft("DestIP   : %s\n", "\t", indent), i.DestinationIP()) +
+		i.PayloadString(frameLen, indent)
 }
 
-func (i IPv4_P) PayloadString(frameLen int) string {
+func (i IPv4_P) PayloadString(frameLen uint32, indent int) string {
 	p, off := i.Payload()
 	frameLen -= off
+	indent++
 	switch i.Protocol() {
 	case TCP:
-		return TCP_P(p).String(frameLen, i.SourceIP(), i.DestinationIP())
+		return TCP_P(p).String(frameLen, indent, i.SourceIP(), i.DestinationIP())
 	case ICMP:
-		return ICMP_P(p).String(frameLen)
+		return ICMP_P(p).String(frameLen, indent)
 	default:
-		return "\tunrecognized ip protocol...\n"
+		indent--
+		return padLeft("unrecognized ip protocol...\n", "\t", indent)
 	}
 }
 
@@ -158,7 +160,7 @@ func (i IPv4_P) DestinationIP() net.IP {
 	return net.IP(i[16:20])
 }
 
-func (i IPv4_P) Payload() ([]byte, int) {
-	off := int(i.IHL() * 4)
+func (i IPv4_P) Payload() ([]byte, uint32) {
+	off := uint32(i.IHL() * 4)
 	return i[off:], off
 }

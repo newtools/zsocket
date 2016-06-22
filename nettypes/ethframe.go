@@ -137,7 +137,7 @@ func (e EthType) String() string {
 	}
 }
 
-type Tagging int
+type Tagging uint32
 
 const (
 	NotTagged    Tagging = 0
@@ -147,12 +147,12 @@ const (
 
 type Frame []byte
 
-func (f *Frame) String(l int) string {
-	return fmt.Sprintf("Mac Len    : %d\n", l) +
-		fmt.Sprintf("MAC Source : %s\n", f.MACSource()) +
-		fmt.Sprintf("MAC Dest   : %s\n", f.MACDestination()) +
-		fmt.Sprintf("MAC Type   : %s\n", f.MACEthertype()) +
-		f.GetPayString(l)
+func (f *Frame) String(l uint32, indent int) string {
+	return fmt.Sprintf(padLeft("Mac Len    : %d\n", "\t", indent), l) +
+		fmt.Sprintf(padLeft("MAC Source : %s\n", "\t", indent), f.MACSource()) +
+		fmt.Sprintf(padLeft("MAC Dest   : %s\n", "\t", indent), f.MACDestination()) +
+		fmt.Sprintf(padLeft("MAC Type   : %s\n", "\t", indent), f.MACEthertype()) +
+		f.GetPayString(l, indent)
 }
 
 func (f *Frame) MACSource() net.HardwareAddr {
@@ -186,19 +186,20 @@ func (f *Frame) MACEthertype() EthType {
 	return EthType{(*f)[pos], (*f)[pos+1]}
 }
 
-func (f *Frame) MACPayload() ([]byte, int) {
-	off := 12 + int(f.MACTagging()) + 2
+func (f *Frame) MACPayload() ([]byte, uint32) {
+	off := 12 + uint32(f.MACTagging()) + 2
 	return (*f)[off:], off
 }
 
-func (f *Frame) GetPayString(frameLen int) string {
+func (f *Frame) GetPayString(frameLen uint32, indent int) string {
 	p, off := f.MACPayload()
 	frameLen -= off
+	indent++
 	switch f.MACEthertype() {
 	case ARP:
-		return ARP_P(p).String()
+		return ARP_P(p).String(indent)
 	case IPv4:
-		return IPv4_P(p).String(frameLen)
+		return IPv4_P(p).String(frameLen, indent)
 	default:
 		return "unknown eth payload...\n"
 	}

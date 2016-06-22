@@ -59,18 +59,18 @@ func (c TCPControl) String() string {
 
 type TCP_P []byte
 
-func (t TCP_P) String(frameLen int, srcAddr, destAddr net.IP) string {
-	return fmt.Sprintf("\t\tTCP Len      : %d\n", frameLen) +
-		fmt.Sprintf("\t\tSource Port  : %d\n", t.SourcePort()) +
-		fmt.Sprintf("\t\tDest Port    : %d\n", t.DestinationPort()) +
-		fmt.Sprintf("\t\tSeq Number   : %d\n", t.SequenceNumber()) +
-		fmt.Sprintf("\t\tACK Number   : %d\n", t.AckNumber()) +
-		fmt.Sprintf("\t\tData Offset  : %d\n", t.DataOffset()) +
-		fmt.Sprintf("\t\tControls     : %s\n", t.Controls()) +
-		fmt.Sprintf("\t\tWindow Size  : %d\n", t.WindowSize()) +
-		fmt.Sprintf("\t\tChecksum     : %02x\n", t.Checksum()) +
-		fmt.Sprintf("\t\tCalcChecksum : %02x\n", t.CalculateChecksum(frameLen, srcAddr, destAddr)) +
-		fmt.Sprintf("\t\tURG Pointer  : %d\n", t.UrgPointer())
+func (t TCP_P) String(frameLen uint32, indent int, srcAddr, destAddr net.IP) string {
+	return fmt.Sprintf(padLeft("TCP Len      : %d\n", "\t", indent), frameLen) +
+		fmt.Sprintf(padLeft("Source Port  : %d\n", "\t", indent), t.SourcePort()) +
+		fmt.Sprintf(padLeft("Dest Port    : %d\n", "\t", indent), t.DestinationPort()) +
+		fmt.Sprintf(padLeft("Seq Number   : %d\n", "\t", indent), t.SequenceNumber()) +
+		fmt.Sprintf(padLeft("ACK Number   : %d\n", "\t", indent), t.AckNumber()) +
+		fmt.Sprintf(padLeft("Data Offset  : %d\n", "\t", indent), t.DataOffset()) +
+		fmt.Sprintf(padLeft("Controls     : %s\n", "\t", indent), t.Controls()) +
+		fmt.Sprintf(padLeft("Window Size  : %d\n", "\t", indent), t.WindowSize()) +
+		fmt.Sprintf(padLeft("Checksum     : %02x\n", "\t", indent), t.Checksum()) +
+		fmt.Sprintf(padLeft("CalcChecksum : %02x\n", "\t", indent), t.CalculateChecksum(frameLen, srcAddr, destAddr)) +
+		fmt.Sprintf(padLeft("URG Pointer  : %d\n", "\t", indent), t.UrgPointer())
 }
 
 func (t TCP_P) SourcePort() uint16 {
@@ -136,7 +136,7 @@ func (t TCP_P) Checksum() uint16 {
 	return inet.NToHS(t[16:18])
 }
 
-func (t TCP_P) CalculateChecksum(frameLen int, srcAddr, destAddr net.IP) uint16 {
+func (t TCP_P) CalculateChecksum(frameLen uint32, srcAddr, destAddr net.IP) uint16 {
 	cs := uint32(inet.HostByteOrder.Uint16(t[0:2])) +
 		uint32(inet.HostByteOrder.Uint16(t[2:4])) +
 		uint32(inet.HostByteOrder.Uint16(t[4:6])) +
@@ -177,7 +177,7 @@ func (t TCP_P) UrgPointer() uint16 {
 	return inet.NToHS(t[18:20])
 }
 
-func (t TCP_P) Payload() ([]byte, int) {
-	off := int(t.DataOffset() * 4)
+func (t TCP_P) Payload() ([]byte, uint32) {
+	off := uint32(t.DataOffset() * 4)
 	return t[off:], off
 }

@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	ENABLE_RX   = 1 << 0
-	ENABLE_TX   = 1 << 1
-	ENABLE_LOSS = 1 << 2
+	ENABLE_RX       = 1 << 0
+	ENABLE_TX       = 1 << 1
+	DISABLE_TX_LOSS = 1 << 2
 )
 
 const (
@@ -110,21 +110,23 @@ func copyFx(dst, src []byte, len uint32) {
 }
 
 type ZSocket struct {
-	socket        int
-	raw           []byte
-	listening     int32
-	frameNum      int
-	frameSize     int
-	rxEnabled     bool
-	txEnabled     bool
-	txLossEnabled bool
-	txChan        chan *ringFrame
-	txFrameSize   uint32
-	txError       error
-	txWriteLock   *fastRWLock
-	txWritten     uint32
-	rxFrames      []*ringFrame
-	txFrames      []*ringFrame
+	socket         int
+	raw            []byte
+	listening      int32
+	frameNum       uint32
+	frameSize      uint32
+	rxEnabled      bool
+	rxFrames       []*ringFrame
+	txEnabled      bool
+	txLossDisabled bool
+	txFrameSize    uint32
+	txIndex        int32
+	txWriteLock    *fastRWLock
+	txWritten      uint32
+	txPollPointer  uintptr
+	txError        error
+	txWriteChan    chan int32
+	txFrames       []*ringFrame
 }
 
 func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSocket, error) {
@@ -147,7 +149,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 
 	zs.rxEnabled = options&ENABLE_RX == ENABLE_RX
 	zs.txEnabled = options&ENABLE_TX == ENABLE_TX
-	zs.txLossEnabled = options&ENABLE_LOSS == ENABLE_LOSS
+	zs.txLossDisabled = options&DISABLE_TX_LOSS == DISABLE_TX_LOSS
 
 	if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_VERSION, _TPACKET_V1); err != nil {
 		return nil, err
@@ -174,7 +176,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		if e1 != 0 {
 			return nil, errnoErr(e1)
 		}
-		if zs.txLossEnabled {
+		if !zs.txLossDisabled {
 			if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_LOSS, 1); err != nil {
 				return nil, err
 			}
@@ -191,10 +193,10 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		return nil, err
 	}
 	zs.raw = bs
-	zs.frameNum = int(req.frameNum)
-	zs.frameSize = int(req.frameSize)
-	i := 0
-	frLoc := 0
+	zs.frameNum = uint32(req.frameNum)
+	zs.frameSize = uint32(req.frameSize)
+	i := uint32(0)
+	frLoc := uint32(0)
 	if zs.rxEnabled {
 		for i = 0; i < zs.frameNum; i++ {
 			frLoc = i * zs.frameSize
@@ -205,16 +207,21 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 	}
 	if zs.txEnabled {
 		zs.txWriteLock = &fastRWLock{&sync.RWMutex{}, 0, 0}
-		zs.txChan = make(chan *ringFrame, zs.frameNum+1)
-		zs.txFrameSize = uint32(_TX_START + zs.frameSize)
-		for t := 0; t < zs.frameNum; t, i = t+1, i+1 {
+		zs.txFrameSize = uint32(_TX_START) + zs.frameSize
+		zs.txWriteChan = make(chan int32, zs.frameNum+1)
+		zs.txWritten = 0
+		pfd := &pollfd{}
+		pfd.fd = zs.socket
+		pfd.events = _POLLERR | _POLLOUT
+		pfd.revents = 0
+		zs.txPollPointer = uintptr(pfd.getPointer())
+		for t := uint32(0); t < zs.frameNum; t, i = t+1, i+1 {
 			frLoc = i * zs.frameSize
 			tx := &ringFrame{}
 			tx.raw = zs.raw[frLoc : frLoc+zs.frameSize]
 			tx.txStart = tx.raw[_TX_START:]
 			zs.txFrames = append(zs.txFrames, tx)
 		}
-		go zs.writePoller()
 	} else {
 		// this is an optimization for the write code so that it doesn't
 		// have to check the boolean txEnabled
@@ -235,7 +242,7 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 	pfd.events = _POLLERR | _POLLIN
 	pfd.revents = 0
 	pfdP := uintptr(pfd.getPointer())
-	rxIndex := 0
+	rxIndex := uint32(0)
 	rf := zs.rxFrames[rxIndex]
 	for {
 		for ; rf.rxReady(); rf = zs.rxFrames[rxIndex] {
@@ -251,76 +258,105 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 	}
 }
 
-func (zs *ZSocket) Write(buf []byte, l uint32) error {
+func (zs *ZSocket) WriteToBuffer(buf []byte, l uint32) (int32, error) {
 	if l > zs.txFrameSize {
-		return fmt.Errorf("the length of the write exceeds the size of the TX frame")
+		return -1, fmt.Errorf("the length of the write exceeds the size of the TX frame")
 	}
 	if l < 0 {
-		return zs.WriteCopy(buf, uint32(len(buf)), copyFx)
+		return zs.CopyToBuffer(buf, uint32(len(buf)), copyFx)
 	}
-	return zs.WriteCopy(buf[:l], l, copyFx)
+	return zs.CopyToBuffer(buf[:l], l, copyFx)
 }
 
-func (zs *ZSocket) WriteCopy(buf []byte, l uint32, copyFx func(dst, srcf []byte, l uint32)) error {
+func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, srcf []byte, l uint32)) (int32, error) {
 	if zs.txError != nil {
-		return zs.txError
+		return -1, zs.txError
 	}
-	tx := <-zs.txChan
+	zs.txWriteLock.RLock()
+	defer zs.txWriteLock.RUnlock()
+	tx, txIndex, err := zs.getFreeTx()
+	if err != nil {
+		return -1, err
+	}
+	for !tx.txReady() {
+		if err := zs.txPoll(); err != nil {
+			return -1, err
+		}
+	}
 	tx.setTpLen(l)
 	tx.setTpSnapLen(l)
 	copyFx(tx.txStart, buf, l)
-	zs.txWriteLock.RLock()
-	tx.txSet(zs.txLossEnabled)
+	tx.txSet()
 	atomic.AddUint32(&zs.txWritten, 1)
-	zs.txWriteLock.RUnlock()
-	if !zs.txLossEnabled {
-		defer atomic.AddInt32(&tx.mb, -1)
-		for inet.Long(tx.raw[0:inet.HOST_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) != 0 {
+	zs.txWriteChan <- txIndex
+	return txIndex, nil
+}
+
+func (zs *ZSocket) FlushFrames() (uint, error, []error) {
+	framesFlushed := uint(0)
+	socket := uintptr(zs.socket)
+	z := uintptr(0)
+	if !atomic.CompareAndSwapUint32(&zs.txWritten, 0, 0) {
+		zs.txWriteLock.Lock()
+		defer zs.txWriteLock.Unlock()
+		for w := zs.txWritten; !atomic.CompareAndSwapUint32(&zs.txWritten, w, 0); w = zs.txWritten {
 			runtime.Gosched()
 		}
-		if inet.Long(tx.raw[0:inet.HOST_LONG_SIZE])&_TP_STATUS_WRONG_FORMAT == _TP_STATUS_WRONG_FORMAT {
-			return fmt.Errorf("packet has wrong format")
+		if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, socket, z, z, z, z, z); e1 != 0 {
+			return framesFlushed, e1, nil
 		}
+	} else {
+		return framesFlushed, nil, nil
+	}
+	var errs []error = nil
+	if zs.txLossDisabled {
+		for i := range zs.txWriteChan {
+			tx := zs.txFrames[i]
+			if zs.txLossDisabled && tx.txWrongFormat() {
+				errs = append(errs, txIndexError(i))
+			} else {
+				framesFlushed++
+			}
+			tx.txSetMB()
+		}
+	} else {
+		for i := range zs.txWriteChan {
+			zs.txFrames[i].txSetMB()
+			framesFlushed++
+		}
+	}
+	return framesFlushed, nil, errs
+}
+
+func (zs *ZSocket) getFreeTx() (*ringFrame, int32, error) {
+	if zs.txWritten == zs.frameNum {
+		return nil, -1, fmt.Errorf("the tx ring buffer is full")
+	}
+	var txIndex int32
+	for txIndex = zs.txIndex; !atomic.CompareAndSwapInt32(&zs.txIndex, txIndex, (txIndex+1)&int32(zs.frameNum)); txIndex = zs.txIndex {
+	}
+	tx := zs.txFrames[txIndex]
+	if !tx.txMBReady() {
+		if err := zs.txPoll(); err != nil {
+			return nil, -1, err
+		}
+		return zs.getFreeTx()
+	}
+	return tx, txIndex, nil
+}
+
+func (zs *ZSocket) txPoll() error {
+	_, _, e1 := syscall.Syscall(syscall.SYS_POLL, zs.txPollPointer, uintptr(1), uintptr(1))
+	if e1 != 0 {
+		return e1
 	}
 	return nil
 }
 
-func (zs *ZSocket) writePoller() {
-	pfd := &pollfd{}
-	pfd.fd = zs.socket
-	pfd.events = _POLLERR | _POLLOUT
-	pfd.revents = 0
-	pfdP := uintptr(pfd.getPointer())
+type txIndexError int32
 
-	txIndex := 0
-	rf := zs.txFrames[txIndex]
-	socket := uintptr(zs.socket)
-	z := uintptr(0)
-	for {
-		for start := 0; rf.txReady(); rf = zs.txFrames[txIndex] {
-			zs.txChan <- rf
-			txIndex = (txIndex + 1) % zs.frameNum
-			start++
-		}
-		if !atomic.CompareAndSwapUint32(&zs.txWritten, 0, 0) {
-			zs.txWriteLock.Lock()
-			for w := zs.txWritten; !atomic.CompareAndSwapUint32(&zs.txWritten, w, 0); w = zs.txWritten {
-				runtime.Gosched()
-			}
-			if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, socket, z, z, z, z, z); e1 != 0 {
-				zs.txError = e1
-				//IMPORTANT!!!
-				zs.txWriteLock.Unlock()
-				return
-			}
-			zs.txWriteLock.Unlock()
-		}
-		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, pfdP, uintptr(1), uintptr(1))
-		if e1 != 0 {
-			zs.txError = e1
-			return
-		}
-	}
+func (ie txIndexError) Error() string {
+	return fmt.Sprintf("tx frame %d had a bad format", ie)
 }
 
 type tpacketReq struct {
@@ -399,7 +435,7 @@ func (req *pollfd) size() int {
 type ringFrame struct {
 	raw     []byte
 	txStart []byte
-	mb      int32
+	mb      uint32
 }
 
 func (rf *ringFrame) macStart() uint16 {
@@ -419,25 +455,33 @@ func (rf *ringFrame) setTpSnapLen(v uint32) {
 }
 
 func (rf *ringFrame) rxReady() bool {
-	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
+	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER && atomic.CompareAndSwapUint32(&rf.mb, 0, 1)
 }
 
 func (rf *ringFrame) rxSet() {
 	inet.PutLong(rf.raw[0:inet.HOST_LONG_SIZE], uint64(_TP_STATUS_KERNEL))
 	// this acts as a memory barrier
-	atomic.AddInt32(&rf.mb, -1)
+	atomic.StoreUint32(&rf.mb, 0)
+}
+
+func (rf *ringFrame) txWrongFormat() bool {
+	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&_TP_STATUS_WRONG_FORMAT == _TP_STATUS_WRONG_FORMAT
 }
 
 func (rf *ringFrame) txReady() bool {
-	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0 && atomic.CompareAndSwapInt32(&rf.mb, 0, 1)
+	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0
 }
 
-func (rf *ringFrame) txSet(setMB bool) {
+func (rf *ringFrame) txMBReady() bool {
+	return atomic.CompareAndSwapUint32(&rf.mb, 0, 1)
+}
+
+func (rf *ringFrame) txSet() {
 	inet.PutLong(rf.raw[0:inet.HOST_LONG_SIZE], uint64(_TP_STATUS_SEND_REQUEST))
-	// this acts as a memory barrier
-	if setMB {
-		atomic.AddInt32(&rf.mb, -1)
-	}
+}
+
+func (rf *ringFrame) txSetMB() {
+	atomic.StoreUint32(&rf.mb, 0)
 }
 
 func (rf *ringFrame) printRxStatus() {
@@ -532,13 +576,13 @@ func (frw *fastRWLock) RUnlock() {
 
 func (frw *fastRWLock) Lock() {
 	frw.rwLock.Lock()
-	atomic.AddInt32(&frw.writting, 1)
+	atomic.StoreInt32(&frw.writting, 1)
 	for !atomic.CompareAndSwapInt32(&frw.readers, 0, 0) {
 		runtime.Gosched()
 	}
 }
 
 func (frw *fastRWLock) Unlock() {
-	atomic.AddInt32(&frw.writting, -1)
+	atomic.StoreInt32(&frw.writting, 0)
 	frw.rwLock.Unlock()
 }

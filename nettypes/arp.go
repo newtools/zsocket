@@ -7,26 +7,38 @@ import (
 	"github.com/nathanjsweet/zsocket/inet"
 )
 
+type ARPOperation uint16
+
+func (ao ARPOperation) String() string {
+	switch ao {
+	case 0x01:
+		return "request"
+	case 0x02:
+		return "reply"
+	}
+	return "unknown arp operation"
+}
+
 type ARP_P []byte
 
-func (a ARP_P) String() string {
-	return fmt.Sprintf("\tHtype : %02x\n", a.HardwareType()) +
-		fmt.Sprintf("\tPtype : %02x\n", a.ProtocolType()) +
-		fmt.Sprintf("\tHlen  : %d\n", a.Hlen()) +
-		fmt.Sprintf("\tPlen  : %d\n", a.Plen()) +
-		fmt.Sprintf("\tOper  : %d\n", a.Operation()) +
-		fmt.Sprintf("\tSHA   : %s\n", a.SHA()) +
-		fmt.Sprintf("\tSPA   : %s\n", a.SPA()) +
-		fmt.Sprintf("\tTHA   : %s\n", a.THA()) +
-		fmt.Sprintf("\tTPA   : %s\n", a.TPA())
+func (a ARP_P) String(indent int) string {
+	return fmt.Sprintf(padLeft("Htype : %02x\n", "\t", indent), a.HardwareType()) +
+		fmt.Sprintf(padLeft("Ptype : %s\n", "\t", indent), a.ProtocolType()) +
+		fmt.Sprintf(padLeft("Hlen  : %d\n", "\t", indent), a.Hlen()) +
+		fmt.Sprintf(padLeft("Plen  : %d\n", "\t", indent), a.Plen()) +
+		fmt.Sprintf(padLeft("Oper  : %s\n", "\t", indent), a.Operation()) +
+		fmt.Sprintf(padLeft("SHA   : %s\n", "\t", indent), a.SHA()) +
+		fmt.Sprintf(padLeft("SPA   : %s\n", "\t", indent), a.SPA()) +
+		fmt.Sprintf(padLeft("THA   : %s\n", "\t", indent), a.THA()) +
+		fmt.Sprintf(padLeft("TPA   : %s\n", "\t", indent), a.TPA())
 }
 
 func (a ARP_P) HardwareType() uint16 {
 	return inet.NToHS(a[0:2])
 }
 
-func (a ARP_P) ProtocolType() uint16 {
-	return inet.NToHS(a[2:4])
+func (a ARP_P) ProtocolType() EthType {
+	return EthType{a[2], a[3]}
 }
 
 func (a ARP_P) Hlen() uint8 {
@@ -37,8 +49,8 @@ func (a ARP_P) Plen() uint8 {
 	return uint8(a[5])
 }
 
-func (a ARP_P) Operation() uint16 {
-	return inet.NToHS(a[6:8])
+func (a ARP_P) Operation() ARPOperation {
+	return ARPOperation(inet.NToHS(a[6:8]))
 }
 
 func (a ARP_P) SHA() net.HardwareAddr {
