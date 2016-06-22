@@ -195,13 +195,13 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 	zs.raw = bs
 	zs.frameNum = uint32(req.frameNum)
 	zs.frameSize = uint32(req.frameSize)
-	i := uint32(0)
-	frLoc := uint32(0)
+	i := 0
+	frLoc := 0
 	if zs.rxEnabled {
-		for i = 0; i < zs.frameNum; i++ {
-			frLoc = i * zs.frameSize
+		for i = 0; i < int(zs.frameNum); i++ {
+			frLoc = i * int(zs.frameSize)
 			rf := &ringFrame{}
-			rf.raw = zs.raw[frLoc : frLoc+zs.frameSize]
+			rf.raw = zs.raw[frLoc : frLoc+int(zs.frameSize)]
 			zs.rxFrames = append(zs.rxFrames, rf)
 		}
 	}
@@ -215,10 +215,10 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		pfd.events = _POLLERR | _POLLOUT
 		pfd.revents = 0
 		zs.txPollPointer = uintptr(pfd.getPointer())
-		for t := uint32(0); t < zs.frameNum; t, i = t+1, i+1 {
-			frLoc = i * zs.frameSize
+		for t := 0; t < int(zs.frameNum); t, i = t+1, i+1 {
+			frLoc = i * int(zs.frameSize)
 			tx := &ringFrame{}
-			tx.raw = zs.raw[frLoc : frLoc+zs.frameSize]
+			tx.raw = zs.raw[frLoc : frLoc+int(zs.frameSize)]
 			tx.txStart = tx.raw[_TX_START:]
 			zs.txFrames = append(zs.txFrames, tx)
 		}
