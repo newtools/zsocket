@@ -6,7 +6,7 @@ It is a lot like libcap, except it has easy to understand facilities for Writing
 Example
 -------
 The following program will print out any recognized nettypes, going down to layer 3.
-```golang
+```go
 package  main
 import "github.com/nathanjsweet/zsocket"
 
