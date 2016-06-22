@@ -13,10 +13,10 @@ import "github.com/nathanjsweet/zsocket"
 func main() {
      zs, err := zsocket.NewZSocket(15, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, nettypes.All)
      if err != nil {
-	panic(err)
+        panic(err)
      }
      zs2.Listen(func(f *nettypes.Frame, frameLen uint32) {
-	fmt.Printf(f.String(frameLen, 0))
+        fmt.Printf(f.String(frameLen, 0))
      })
 }
 ```
