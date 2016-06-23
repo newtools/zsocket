@@ -30,7 +30,6 @@ var (
 	// (nh)s
 	NToHS    func([]byte) uint16
 	PutNToHS func([]byte, uint16)
-	NToHSFS  func(uint16) uint16
 	HToNS    func([]byte) uint16
 	HToNSFS  func(uint16) uint16
 	PutHToNS func([]byte, uint16)
@@ -38,7 +37,6 @@ var (
 	// (nh)i
 	NToHI    func([]byte) uint32
 	PutNToHI func([]byte, uint32)
-	NToHIFI  func(uint32) uint32
 	HToNI    func([]byte) uint32
 	HToNIFI  func(uint32) uint32
 	PutHToNI func([]byte, uint32)
@@ -46,7 +44,6 @@ var (
 	// (nh)l
 	NToHL    func([]byte) uint64
 	PutNToHL func([]byte, uint64)
-	NToHLFL  func(uint64) uint64
 	HToNL    func([]byte) uint64
 	HToNLFL  func(uint64) uint64
 	PutHToNL func([]byte, uint64)
@@ -63,40 +60,35 @@ func init() {
 		IsLittleEndian = true
 		HostByteOrder = binary.LittleEndian
 	}
+
 	Short = HostByteOrder.Uint16
 	PutShort = HostByteOrder.PutUint16
-	HToNS = HostByteOrder.Uint16
-	PutHToNS = HostByteOrder.PutUint16
-	NToHS = HostByteOrder.Uint16
-	PutNToHS = HostByteOrder.PutUint16
 	if isBE {
+		PutHToNS = binary.BigEndian.PutUint16
+		HToNS = HostByteOrder.Uint16
 		HToNSFS = _beSFS
-		NToHSFS = _beSFS
-		NToHIFI = _beIFI
-		NToHLFL = _beLFL
 		HToNIFI = _beIFI
 		HToNLFL = _beLFL
+
+		PutNToHS = HostByteOrder.PutUint16
+		NToHS = binary.BigEndian.Uint16
 	} else {
-		PutNToHS = binary.LittleEndian.PutUint16
-		HToNSFS = _beSFS
+		PutHToNS = binary.BigEndian.PutUint16
+		HToNS = HostByteOrder.Uint16
+		HToNSFS = _beToLeSFS
 		HToNLFL = _beToLeLFL
 		HToNIFI = _beToLeIFI
-		NToHSFS = _beToLeSFS
-		NToHIFI = _beToLeIFI
-		NToHLFL = _beToLeLFL
+
+		PutNToHS = HostByteOrder.PutUint16
 	}
 	if HOST_INT_SIZE == 4 {
 		Int = HostByteOrder.Uint32
 		PutInt = HostByteOrder.PutUint32
-		HToNI = binary.BigEndian.Uint32
+
 		PutHToNI = binary.BigEndian.PutUint32
-		if isBE {
-			NToHI = binary.BigEndian.Uint32
-			PutHToNI = binary.BigEndian.PutUint32
-		} else {
-			NToHI = binary.LittleEndian.Uint32
-			PutHToNI = binary.LittleEndian.PutUint32
-		}
+		HToNI = HostByteOrder.Uint32
+		PutNToHI = HostByteOrder.PutUint32
+		NToHI = binary.BigEndian.Uint32
 	} else {
 		Int = func(b []byte) uint32 {
 			return uint32(HostByteOrder.Uint64(b))
@@ -104,24 +96,17 @@ func init() {
 		PutInt = func(b []byte, v uint32) {
 			HostByteOrder.PutUint64(b, uint64(v))
 		}
-		HToNI = func(b []byte) uint32 {
-			return uint32(binary.BigEndian.Uint64(b))
+		PutHToNI = func(b []byte, v uint32) {
+			binary.BigEndian.PutUint64(b, uint64(v))
 		}
-		PutHToNI = binary.BigEndian.PutUint32
-		if isBE {
-			NToHI = func(b []byte) uint32 {
-				return uint32(binary.BigEndian.Uint64(b))
-			}
-			PutHToNI = func(b []byte, v uint32) {
-				binary.BigEndian.PutUint64(b, uint64(v))
-			}
-		} else {
-			NToHI = func(b []byte) uint32 {
-				return uint32(binary.LittleEndian.Uint64(b))
-			}
-			PutHToNI = func(b []byte, v uint32) {
-				binary.LittleEndian.PutUint64(b, uint64(v))
-			}
+		HToNI = func(b []byte) uint32 {
+			return uint32(HostByteOrder.Uint64(b))
+		}
+		PutNToHI = func(b []byte, v uint32) {
+			HostByteOrder.PutUint64(b, uint64(v))
+		}
+		NToHI = func(b []byte) uint32 {
+			return uint32(binary.BigEndian.Uint64(b))
 		}
 	}
 	if HOST_LONG_SIZE == 4 {
@@ -131,39 +116,25 @@ func init() {
 		PutLong = func(b []byte, v uint64) {
 			HostByteOrder.PutUint32(b, uint32(v))
 		}
-		HToNL = func(b []byte) uint64 {
-			return uint64(binary.BigEndian.Uint32(b))
-		}
 		PutHToNL = func(b []byte, v uint64) {
 			binary.BigEndian.PutUint32(b, uint32(v))
 		}
-		if isBE {
-			NToHL = func(b []byte) uint64 {
-				return uint64(binary.BigEndian.Uint32(b))
-			}
-			PutHToNL = func(b []byte, v uint64) {
-				binary.BigEndian.PutUint32(b, uint32(v))
-			}
-		} else {
-			NToHL = func(b []byte) uint64 {
-				return uint64(binary.LittleEndian.Uint32(b))
-			}
-			PutHToNL = func(b []byte, v uint64) {
-				binary.LittleEndian.PutUint32(b, uint32(v))
-			}
+		HToNL = func(b []byte) uint64 {
+			return uint64(HostByteOrder.Uint32(b))
+		}
+		PutNToHL = func(b []byte, v uint64) {
+			HostByteOrder.PutUint32(b, uint32(v))
+		}
+		NToHL = func(b []byte) uint64 {
+			return uint64(binary.BigEndian.Uint32(b))
 		}
 	} else {
 		Long = HostByteOrder.Uint64
 		PutLong = HostByteOrder.PutUint64
-		HToNL = binary.BigEndian.Uint64
 		PutHToNL = binary.BigEndian.PutUint64
-		if isBE {
-			NToHL = binary.BigEndian.Uint64
-			PutHToNL = binary.BigEndian.PutUint64
-		} else {
-			NToHL = binary.LittleEndian.Uint64
-			PutHToNL = binary.LittleEndian.PutUint64
-		}
+		HToNL = HostByteOrder.Uint64
+		PutNToHL = HostByteOrder.PutUint64
+		NToHL = binary.BigEndian.Uint64
 	}
 
 }
