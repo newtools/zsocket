@@ -25,6 +25,10 @@ const (
 // because it depends on an init func
 var _PROTO_TCP uint32
 
+func init() {
+	_PROTO_TCP = inet.HToNIFI(uint32(TCP))
+}
+
 func (c TCPControl) String() string {
 	s := ""
 	if c&NS == NS {
