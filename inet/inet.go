@@ -61,25 +61,22 @@ func init() {
 		HostByteOrder = binary.LittleEndian
 	}
 
+	// network uses BigEndian
+	NToHS = binary.BigEndian.Uint16
+	PutHToNS = binary.BigEndian.PutUint16
+
+	HToNS = HostByteOrder.Uint16
+	PutNToHS = HostByteOrder.PutUint16
 	Short = HostByteOrder.Uint16
 	PutShort = HostByteOrder.PutUint16
 	if isBE {
-		PutHToNS = binary.BigEndian.PutUint16
-		HToNS = HostByteOrder.Uint16
 		HToNSFS = _beSFS
 		HToNIFI = _beIFI
 		HToNLFL = _beLFL
-
-		PutNToHS = HostByteOrder.PutUint16
-		NToHS = binary.BigEndian.Uint16
 	} else {
-		PutHToNS = binary.BigEndian.PutUint16
-		HToNS = HostByteOrder.Uint16
 		HToNSFS = _beToLeSFS
 		HToNLFL = _beToLeLFL
 		HToNIFI = _beToLeIFI
-
-		PutNToHS = HostByteOrder.PutUint16
 	}
 	if HOST_INT_SIZE == 4 {
 		Int = HostByteOrder.Uint32
