@@ -2,7 +2,7 @@ ZSocket
 -------
 ZSocket is a library that wraps the linux zero-copy socket syscall to create a ring buffer in a memory mapped file.
 It also contains some utility functions and types to help with a handful of layer 2 and layer 3 types.
-It is a lot like libcap, except it has easy to understand facilities for Writing to an interface.
+It is a lot like libcap, except it has easy to understand facilities for writing (injecting packets) to an interface.
 Example
 -------
 The following program will print out any recognized nettypes, going down to layer 3.
