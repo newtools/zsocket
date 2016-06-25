@@ -73,7 +73,7 @@ func (t TCP_P) String(frameLen uint32, indent int, srcAddr, destAddr net.IP) str
 		fmt.Sprintf(padLeft("Controls     : %s\n", "\t", indent), t.Controls()) +
 		fmt.Sprintf(padLeft("Window Size  : %d\n", "\t", indent), t.WindowSize()) +
 		fmt.Sprintf(padLeft("Checksum     : %02x\n", "\t", indent), t.Checksum()) +
-		fmt.Sprintf(padLeft("CalcChecksum : %02x\n", "\t", indent), t.CalculateChecksum(frameLen, srcAddr, destAddr)) +
+		fmt.Sprintf(padLeft("CalcChecksum : %02x\n", "\t", indent), inet.HToNSFS(t.CalculateChecksum(frameLen, srcAddr, destAddr))) +
 		fmt.Sprintf(padLeft("URG Pointer  : %d\n", "\t", indent), t.UrgPointer())
 }
 
@@ -170,11 +170,11 @@ func (t TCP_P) CalculateChecksum(frameLen uint32, srcAddr, destAddr net.IP) uint
 	for cs>>16 > 0 {
 		cs = (cs & 0xffff) + (cs >> 16)
 	}
-	return inet.HToNSFS(^uint16(cs))
+	return ^uint16(cs)
 }
 
 func (t TCP_P) SetChecksum(v uint16) {
-	inet.PutNToHS(t[16:18], v)
+	inet.PutShort(t[16:18], v)
 }
 
 func (t TCP_P) UrgPointer() uint16 {

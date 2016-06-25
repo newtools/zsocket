@@ -123,9 +123,9 @@ type ZSocket struct {
 	txIndex        int32
 	txWriteLock    *fastRWLock
 	txWritten      uint32
+	txWrittenIndex uint32
 	txPollPointer  uintptr
 	txError        error
-	txWriteChan    chan int32
 	txFrames       []*ringFrame
 }
 
@@ -176,11 +176,11 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		if e1 != 0 {
 			return nil, errnoErr(e1)
 		}
-		if !zs.txLossDisabled {
+		/*if !zs.txLossDisabled {
 			if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_LOSS, 1); err != nil {
 				return nil, err
 			}
-		}
+		}*/
 	}
 
 	size := req.blockSize * req.blockNum
@@ -208,7 +208,6 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 	if zs.txEnabled {
 		zs.txWriteLock = &fastRWLock{&sync.RWMutex{}, 0, 0}
 		zs.txFrameSize = uint32(_TX_START) + zs.frameSize
-		zs.txWriteChan = make(chan int32, zs.frameNum+1)
 		zs.txWritten = 0
 		pfd := &pollfd{}
 		pfd.fd = zs.socket
@@ -287,30 +286,33 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, srcf []by
 	tx.setTpSnapLen(l)
 	copyFx(tx.txStart, buf, l)
 	tx.txSet()
-	atomic.AddUint32(&zs.txWritten, 1)
-	zs.txWriteChan <- txIndex
+	if atomic.AddUint32(&zs.txWritten, 1) == 1 {
+		zs.txWrittenIndex = uint32(txIndex)
+	}
 	return txIndex, nil
 }
 
 func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 	framesFlushed := uint(0)
-	socket := uintptr(zs.socket)
 	z := uintptr(0)
+	var written uint32 = 0
 	if !atomic.CompareAndSwapUint32(&zs.txWritten, 0, 0) {
 		zs.txWriteLock.Lock()
-		defer zs.txWriteLock.Unlock()
-		for w := zs.txWritten; !atomic.CompareAndSwapUint32(&zs.txWritten, w, 0); w = zs.txWritten {
+		for written = zs.txWritten; !atomic.CompareAndSwapUint32(&zs.txWritten, written, 0); written = zs.txWritten {
 			runtime.Gosched()
 		}
-		if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, socket, z, z, z, z, z); e1 != 0 {
+		if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, uintptr(zs.socket), z, z, z, z, z); e1 != 0 {
+			zs.txWriteLock.Unlock()
 			return framesFlushed, e1, nil
 		}
 	} else {
 		return framesFlushed, nil, nil
 	}
+	i := zs.txWrittenIndex
+	zs.txWriteLock.Unlock()
 	var errs []error = nil
 	if zs.txLossDisabled {
-		for i := range zs.txWriteChan {
+		for ; written > 0; written-- {
 			tx := zs.txFrames[i]
 			if zs.txLossDisabled && tx.txWrongFormat() {
 				errs = append(errs, txIndexError(i))
@@ -318,11 +320,13 @@ func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 				framesFlushed++
 			}
 			tx.txSetMB()
+			i = (i + 1) % zs.frameNum
 		}
 	} else {
-		for i := range zs.txWriteChan {
+		for ; written > 0; written-- {
 			zs.txFrames[i].txSetMB()
 			framesFlushed++
+			i = (i + 1) % zs.frameNum
 		}
 	}
 	return framesFlushed, nil, errs
@@ -333,7 +337,7 @@ func (zs *ZSocket) getFreeTx() (*ringFrame, int32, error) {
 		return nil, -1, fmt.Errorf("the tx ring buffer is full")
 	}
 	var txIndex int32
-	for txIndex = zs.txIndex; !atomic.CompareAndSwapInt32(&zs.txIndex, txIndex, (txIndex+1)&int32(zs.frameNum)); txIndex = zs.txIndex {
+	for txIndex = zs.txIndex; !atomic.CompareAndSwapInt32(&zs.txIndex, txIndex, (txIndex+1)%int32(zs.frameNum)); txIndex = zs.txIndex {
 	}
 	tx := zs.txFrames[txIndex]
 	if !tx.txMBReady() {

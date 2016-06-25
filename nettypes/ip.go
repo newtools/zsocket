@@ -56,7 +56,7 @@ func (i IPv4_P) String(frameLen uint32, indent int) string {
 		fmt.Sprintf(padLeft("TTL HC   : %d\n", "\t", indent), i.TTLHopCount()) +
 		fmt.Sprintf(padLeft("Protocol : %s\n", "\t", indent), i.Protocol()) +
 		fmt.Sprintf(padLeft("Checksum : %02x\n", "\t", indent), i.Checksum()) +
-		fmt.Sprintf(padLeft("Calcsum  : %02x\n", "\t", indent), i.CalculateChecksum()) +
+		fmt.Sprintf(padLeft("Calcsum  : %02x\n", "\t", indent), inet.HToNSFS(i.CalculateChecksum())) +
 		fmt.Sprintf(padLeft("SourceIP : %s\n", "\t", indent), i.SourceIP()) +
 		fmt.Sprintf(padLeft("DestIP   : %s\n", "\t", indent), i.DestinationIP()) +
 		i.PayloadString(frameLen, indent)

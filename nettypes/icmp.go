@@ -147,7 +147,7 @@ func (p ICMP_P) String(frameLen uint32, indent int) string {
 		fmt.Sprintf(padLeft("Type         : %s\n", "\t", indent), typ) +
 		fmt.Sprintf(padLeft("Code         : %s\n", "\t", indent), p.Code().String(typ)) +
 		fmt.Sprintf(padLeft("Checksum     : %02x\n", "\t", indent), p.Checksum()) +
-		fmt.Sprintf(padLeft("CalcChecksum : %02x\n", "\t", indent), p.CalculateChecksum(frameLen))
+		fmt.Sprintf(padLeft("CalcChecksum : %02x\n", "\t", indent), inet.HToNSFS(p.CalculateChecksum(frameLen)))
 	if len(ps) > 0 {
 		s += fmt.Sprintf(padLeft("Payload      :\n%s", "\t", indent), ps)
 	}
@@ -184,8 +184,7 @@ func (p ICMP_P) CalculateChecksum(frameLen uint32) uint16 {
 	for cs>>16 > 0 {
 		cs = (cs & 0xffff) + (cs >> 16)
 	}
-	csum := ^uint16(cs)
-	return inet.HToNSFS(csum)
+	return ^uint16(cs)
 }
 
 func (p ICMP_P) Payload() (ICMP_Payload, uint32) {
