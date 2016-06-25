@@ -1,11 +1,11 @@
 ZSocket
 -------
 ZSocket is a library that wraps the linux zero-copy socket syscall to create a ring buffer in a memory mapped file.
-It also contains some utility functions and types to help with a handful of layer 2 and layer 3 types.
+It also contains some utility functions and types to help with a handful of layer 2, 3, and 4 types.
 It is a lot like libcap, except it has easy to understand facilities for writing (injecting packets) to an interface.
 Example
 -------
-The following program will print out any recognized nettypes, going down to layer 3.
+The following program will print out any recognized nettypes, going down to layer 4.
 You can find your interface index number by running `ip link`.
 ```go
 package  main
@@ -26,7 +26,7 @@ func main() {
 }
 ```
 
-The following code will create a simple bridge between two interfaces that will allow tcp through (no other checksum dependent layer 3 types though):
+The following code will create a simple bridge between two interfaces that will allow tcp (no other checksum dependent layer 4 types though):
 ```go
 package main
 
