@@ -46,7 +46,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	go panic(zs.Listen(func(f *nettypes.Frame, frameLen uint32) {
+	go zs.Listen(func(f *nettypes.Frame, frameLen uint32) {
 		processFrame(f, frameLen)
 		fmt.Println("25:")
 		fmt.Println(f.String(frameLen, 0))
@@ -61,8 +61,8 @@ func main() {
 		if len(errs) > 0 {
 			panic(errs)
 		}
-	}))
-	panic(zs2.Listen(func(f *nettypes.Frame, frameLen uint32) {
+	})
+	zs2.Listen(func(f *nettypes.Frame, frameLen uint32) {
 		processFrame(f, frameLen)
 		fmt.Println("27:")
 		fmt.Println(f.String(frameLen, 0))
@@ -77,7 +77,7 @@ func main() {
 		if len(errs) > 0 {
 			panic(errs)
 		}
-	}))
+	})
 }
 
 func processFrame(f *nettypes.Frame, frameLen uint32) {
