@@ -207,7 +207,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 	}
 	if zs.txEnabled {
 		zs.txWriteLock = &fastRWLock{&sync.RWMutex{}, 0, 0}
-		zs.txFrameSize = uint32(_TX_START) + zs.frameSize
+		zs.txFrameSize = zs.frameSize - uint32(_TX_START)
 		zs.txWritten = 0
 		pfd := &pollfd{}
 		pfd.fd = zs.socket
