@@ -26,7 +26,7 @@ func main() {
 }
 ```
 
-The following code will create a simple bridge between two interfaces:
+The following code will create a simple bridge between two interfaces that will allow tcp through (no other checksum dependent layer 3 types though):
 ```go
 package main
 
