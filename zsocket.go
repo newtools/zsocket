@@ -109,6 +109,8 @@ func copyFx(dst, src []byte, len uint32) {
 	copy(dst, src)
 }
 
+// ZSocket opens a zero copy ring-buffer to the specified interface.
+// Do not manually initialize ZSocket. Use `NewZSocket`.
 type ZSocket struct {
 	socket         int
 	raw            []byte
@@ -129,7 +131,20 @@ type ZSocket struct {
 	txFrames       []*ringFrame
 }
 
+// NewZSocket opens a "ZSocket" on the specificed interface
+// (by interfaceIndex). Whether the TX ring, RX ring, or both
+// are enabled are options that can be passed. Additionally,
+// an option can be passed that will tell the kernel to pay
+// attention to packet faults, called DISABLE_TX_LOSS. The
+// size of the ring-buffer can be manipulated with blockNum,
+// which must be a multiple of two. A block corresponds to 8KB.
+// For example, a 256 blockNum would create a 2MB ring-buffer.
+// Finally the ethType can be specified, which will only place
+// packets matching the type in the ring buffer. "All" is an option.
 func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSocket, error) {
+	if blockNum%2 != 0 {
+		return nil, fmt.Errorf("blockNum arg must be a multiple of 2")
+	}
 	zs := new(ZSocket)
 
 	eT := inet.HToNS(ethType[0:])
@@ -206,7 +221,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		}
 	}
 	if zs.txEnabled {
-		zs.txWriteLock = &fastRWLock{&sync.RWMutex{}, 0, 0}
+		zs.txWriteLock = &fastRWLock{&sync.Mutex{}, 0, 0}
 		zs.txFrameSize = zs.frameSize - uint32(_TX_START)
 		zs.txWritten = 0
 		pfd := &pollfd{}
@@ -229,6 +244,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 	return zs, nil
 }
 
+// Listen to all specified packets in the RX ring-buffer
 func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 	if !zs.rxEnabled {
 		return fmt.Errorf("the RX ring is disabled on this socket")
@@ -243,6 +259,8 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 	pfdP := uintptr(pfd.getPointer())
 	rxIndex := uint32(0)
 	rf := zs.rxFrames[rxIndex]
+	pollTimeout := -1
+	pTOPointer := uintptr(unsafe.Pointer(&pollTimeout))
 	for {
 		for ; rf.rxReady(); rf = zs.rxFrames[rxIndex] {
 			f := nettypes.Frame(rf.raw[rf.macStart():])
@@ -250,13 +268,15 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 			rf.rxSet()
 			rxIndex = (rxIndex + 1) % zs.frameNum
 		}
-		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, pfdP, uintptr(1), uintptr(1))
+		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, pfdP, uintptr(1), pTOPointer)
 		if e1 != 0 {
 			return e1
 		}
 	}
 }
 
+// WriteToBuffer writes a raw frame in bytes to the TX ring buffer.
+// The length of the frame must be specified.
 func (zs *ZSocket) WriteToBuffer(buf []byte, l uint32) (int32, error) {
 	if l > zs.txFrameSize {
 		return -1, fmt.Errorf("the length of the write exceeds the size of the TX frame")
@@ -267,7 +287,11 @@ func (zs *ZSocket) WriteToBuffer(buf []byte, l uint32) (int32, error) {
 	return zs.CopyToBuffer(buf[:l], l, copyFx)
 }
 
-func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, srcf []byte, l uint32)) (int32, error) {
+// CopyToBuffer is like WriteToBuffer, it writes a frame to the TX
+// ring buffer. However, it can take a function argument, that will
+// be passed the raw TX byes so that custom logic can be applied
+// to copying the frame (for example, encrypting the frame).
+func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byte, l uint32)) (int32, error) {
 	if zs.txError != nil {
 		return -1, zs.txError
 	}
@@ -276,11 +300,6 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, srcf []by
 	tx, txIndex, err := zs.getFreeTx()
 	if err != nil {
 		return -1, err
-	}
-	for !tx.txReady() {
-		if err := zs.txPoll(); err != nil {
-			return -1, err
-		}
 	}
 	tx.setTpLen(l)
 	tx.setTpSnapLen(l)
@@ -292,16 +311,22 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, srcf []by
 	return txIndex, nil
 }
 
+// FlushFrames tells the kernel to flush all packets written
+// to the TX ring buffer. This function "stops the world" for
+// the TX ring buffer, i.e. all calls to WriteToBuffer and CopyToBuffer
+// will wait for FlushFrames to finish its syscall.
 func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 	framesFlushed := uint(0)
+	written := uint32(0)
 	z := uintptr(0)
-	var written uint32 = 0
 	if !atomic.CompareAndSwapUint32(&zs.txWritten, 0, 0) {
+		// this lock can get unlocked in two different ways
 		zs.txWriteLock.Lock()
 		for written = zs.txWritten; !atomic.CompareAndSwapUint32(&zs.txWritten, written, 0); written = zs.txWritten {
 			runtime.Gosched()
 		}
 		if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, uintptr(zs.socket), z, z, z, z, z); e1 != 0 {
+			// unlock 1
 			zs.txWriteLock.Unlock()
 			return framesFlushed, e1, nil
 		}
@@ -309,6 +334,7 @@ func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 		return framesFlushed, nil, nil
 	}
 	i := zs.txWrittenIndex
+	// unlock 2
 	zs.txWriteLock.Unlock()
 	var errs []error = nil
 	if zs.txLossDisabled {
@@ -340,17 +366,19 @@ func (zs *ZSocket) getFreeTx() (*ringFrame, int32, error) {
 	for txIndex = zs.txIndex; !atomic.CompareAndSwapInt32(&zs.txIndex, txIndex, (txIndex+1)%int32(zs.frameNum)); txIndex = zs.txIndex {
 	}
 	tx := zs.txFrames[txIndex]
-	if !tx.txMBReady() {
-		if err := zs.txPoll(); err != nil {
+	for !tx.txReady() {
+		if err := zs.txPoll(-1); err != nil {
 			return nil, -1, err
 		}
-		return zs.getFreeTx()
+	}
+	for !tx.txMBReady() {
+		runtime.Gosched()
 	}
 	return tx, txIndex, nil
 }
 
-func (zs *ZSocket) txPoll() error {
-	_, _, e1 := syscall.Syscall(syscall.SYS_POLL, zs.txPollPointer, uintptr(1), uintptr(1))
+func (zs *ZSocket) txPoll(timeOut int) error {
+	_, _, e1 := syscall.Syscall(syscall.SYS_POLL, zs.txPollPointer, uintptr(1), uintptr(unsafe.Pointer(&timeOut)))
 	if e1 != 0 {
 		return e1
 	}
@@ -550,27 +578,19 @@ func (rf *ringFrame) printRxTxStatus(s uint64) {
 	}
 }
 
-// A ReadWrite lock that gives
-// absolutely priority to the writer
-//
-// THIS LOCK SHOULD NOT BE COPIED OR REUSED
-// it assumes only one writer will call
-// Lock at a time. This works for its
-// use case in this codebase, but is
-// unlikely a good fit for others
+// A ReadWrite lock that gives absolute priority to the writer
 type fastRWLock struct {
-	rwLock   *sync.RWMutex
+	l        *sync.Mutex
 	writting int32
 	readers  int32
 }
 
 func (frw *fastRWLock) RLock() {
 	atomic.AddInt32(&frw.readers, 1)
-	if !atomic.CompareAndSwapInt32(&frw.writting, 0, 0) {
+	for !atomic.CompareAndSwapInt32(&frw.writting, 0, 0) {
 		atomic.AddInt32(&frw.readers, -1)
-		frw.rwLock.RLock()
-		frw.rwLock.RUnlock()
-		frw.RLock()
+		runtime.Gosched()
+		atomic.AddInt32(&frw.readers, 1)
 	}
 }
 
@@ -579,7 +599,7 @@ func (frw *fastRWLock) RUnlock() {
 }
 
 func (frw *fastRWLock) Lock() {
-	frw.rwLock.Lock()
+	frw.l.Lock()
 	atomic.StoreInt32(&frw.writting, 1)
 	for !atomic.CompareAndSwapInt32(&frw.readers, 0, 0) {
 		runtime.Gosched()
@@ -588,5 +608,5 @@ func (frw *fastRWLock) Lock() {
 
 func (frw *fastRWLock) Unlock() {
 	atomic.StoreInt32(&frw.writting, 0)
-	frw.rwLock.Unlock()
+	frw.l.Unlock()
 }
