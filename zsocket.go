@@ -123,7 +123,7 @@ type ZSocket struct {
 	txLossDisabled bool
 	txFrameSize    uint32
 	txIndex        int32
-	txWriteLock    *fastRWLock
+	txWriteLock    *sync.RWMutex
 	txWritten      uint32
 	txWrittenIndex uint32
 	txPollPointer  uintptr
@@ -221,7 +221,7 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		}
 	}
 	if zs.txEnabled {
-		zs.txWriteLock = &fastRWLock{&sync.Mutex{}, 0, 0}
+		zs.txWriteLock = &sync.RWMutex{}
 		zs.txFrameSize = zs.frameSize - uint32(_TX_START)
 		zs.txWritten = 0
 		pfd := &pollfd{}
@@ -317,25 +317,15 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byt
 // will wait for FlushFrames to finish its syscall.
 func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 	framesFlushed := uint(0)
-	written := uint32(0)
 	z := uintptr(0)
-	if !atomic.CompareAndSwapUint32(&zs.txWritten, 0, 0) {
-		// this lock can get unlocked in two different ways
-		zs.txWriteLock.Lock()
-		for written = zs.txWritten; !atomic.CompareAndSwapUint32(&zs.txWritten, written, 0); written = zs.txWritten {
-			runtime.Gosched()
-		}
-		if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, uintptr(zs.socket), z, z, z, z, z); e1 != 0 {
-			// unlock 1
-			zs.txWriteLock.Unlock()
-			return framesFlushed, e1, nil
-		}
-	} else {
-		return framesFlushed, nil, nil
-	}
+	zs.txWriteLock.Lock()
+	defer zs.txWriteLock.Unlock()
+	written := zs.txWritten
 	i := zs.txWrittenIndex
-	// unlock 2
-	zs.txWriteLock.Unlock()
+	zs.txWritten = 0
+	if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, uintptr(zs.socket), z, z, z, z, z); e1 != 0 {
+		return framesFlushed, e1, nil
+	}
 	var errs []error = nil
 	if zs.txLossDisabled {
 		for ; written > 0; written-- {
@@ -576,37 +566,4 @@ func (rf *ringFrame) printRxTxStatus(s uint64) {
 	if s&_TP_STATUS_TS_RAW_HARDWARE > 0 {
 		fmt.Printf(" Hardware")
 	}
-}
-
-// A ReadWrite lock that gives absolute priority to the writer
-type fastRWLock struct {
-	l        *sync.Mutex
-	writting int32
-	readers  int32
-}
-
-func (frw *fastRWLock) RLock() {
-	atomic.AddInt32(&frw.readers, 1)
-	for !atomic.CompareAndSwapInt32(&frw.writting, 0, 0) {
-		atomic.AddInt32(&frw.readers, -1)
-		runtime.Gosched()
-		atomic.AddInt32(&frw.readers, 1)
-	}
-}
-
-func (frw *fastRWLock) RUnlock() {
-	atomic.AddInt32(&frw.readers, -1)
-}
-
-func (frw *fastRWLock) Lock() {
-	frw.l.Lock()
-	atomic.StoreInt32(&frw.writting, 1)
-	for !atomic.CompareAndSwapInt32(&frw.readers, 0, 0) {
-		runtime.Gosched()
-	}
-}
-
-func (frw *fastRWLock) Unlock() {
-	atomic.StoreInt32(&frw.writting, 0)
-	frw.l.Unlock()
 }
