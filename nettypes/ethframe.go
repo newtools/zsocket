@@ -3,6 +3,8 @@ package nettypes
 import (
 	"fmt"
 	"net"
+
+	"github.com/nathanjsweet/zsocket/inet"
 )
 
 type EthType [2]byte
@@ -137,22 +139,63 @@ func (e EthType) String() string {
 	}
 }
 
-type Tagging uint32
+type VLANTag uint32
 
 const (
-	NotTagged    Tagging = 0
-	Tagged       Tagging = 4
-	DoubleTagged Tagging = 8
+	NotTagged VLANTag = 0
+	Tagged    VLANTag = 4
 )
+
+type PCP uint8
+
+const (
+	BK = PCP(0x01)
+	BE = PCP(0x00)
+	EE = PCP(0x02)
+	CA = PCP(0x03)
+	VI = PCP(0x04)
+	VO = PCP(0x05)
+	IC = PCP(0x06)
+	NC = PCP(0x07)
+)
+
+func (pcp PCP) String() string {
+	switch pcp {
+	case BK:
+		return "BK - Background"
+	case BE:
+		return "BE - Best Effort"
+	case EE:
+		return "EE - Excellent Effort"
+	case CA:
+		return "CA - Critical Applications"
+	case VI:
+		return "VI - Video"
+	case VO:
+		return "VO - Voice"
+	case IC:
+		return "IC - Internetwork Control"
+	case NC:
+		return "NC - Network Control"
+	}
+	return fmt.Sprintf("corrupt type: %v", uint8(pcp))
+}
 
 type Frame []byte
 
 func (f *Frame) String(l uint32, indent int) string {
-	return fmt.Sprintf(padLeft("Mac Len    : %d\n", "\t", indent), l) +
+	s := fmt.Sprintf(padLeft("Mac Len    : %d\n", "\t", indent), l) +
 		fmt.Sprintf(padLeft("MAC Source : %s\n", "\t", indent), f.MACSource()) +
-		fmt.Sprintf(padLeft("MAC Dest   : %s\n", "\t", indent), f.MACDestination()) +
-		fmt.Sprintf(padLeft("MAC Type   : %s\n", "\t", indent), f.MACEthertype()) +
-		f.GetPayString(l, indent)
+		fmt.Sprintf(padLeft("MAC Dest   : %s\n", "\t", indent), f.MACDestination())
+	mT := f.VLANTag()
+	if mT == Tagged {
+		s += fmt.Sprint(padLeft("VLAN Info  : \n", "\t", indent))
+		s += fmt.Sprintf(padLeft("PCP        : %s\n", "\t", indent), f.VLANPCP())
+		s += fmt.Sprintf(padLeft("DEI        : %s\n", "\t", indent), f.VLANDEI())
+		s += fmt.Sprintf(padLeft("ID         : %s\n", "\t", indent), f.VLANID())
+	}
+	s += fmt.Sprintf(padLeft("MAC Type   : %s\n", "\t", indent), f.MACEthertype(mT)) +
+		f.GetPayString(l, indent, mT)
 }
 
 func (f *Frame) MACSource() net.HardwareAddr {
@@ -163,39 +206,40 @@ func (f *Frame) MACDestination() net.HardwareAddr {
 	return net.HardwareAddr((*f)[:6])
 }
 
-func (f *Frame) MACTagging() Tagging {
-	b1, b2 := (*f)[12], (*f)[13]
-	if b1 == 0x81 && b2 == 0x00 {
-		b3, b4 := (*f)[16], (*f)[17]
-		if b3 == 0x81 && b4 == 0x00 {
-			return DoubleTagged
-		}
+func (f *Frame) VLANTag() VLANTag {
+	if (*f)[12] == 0x81 && (*f)[13] == 0x00 {
 		return Tagged
-	}
-	if (b1 == 0x91 || b1 == 0x92) && b2 == 0x00 {
-		return DoubleTagged
-	}
-	if b1 == 0x88 && b2 == 0xA8 {
-		return DoubleTagged
 	}
 	return NotTagged
 }
 
-func (f *Frame) MACEthertype() EthType {
-	pos := 12 + f.MACTagging()
+func (f *Frame) VLANPCP() PCP {
+	return PCP((*f)[14] & 0xE0)
+}
+
+func (f *Frame) VLANDEI() bool {
+	return (*f)[14]&0x20 == 0x20
+}
+
+func (f *Frame) VLANID() uint16 {
+	return inet.NToHS([]byte{(*f)[14] & 0x0f, (*f)[15]})
+}
+
+func (f *Frame) MACEthertype(tag VLANTag) EthType {
+	pos := 12 + tag
 	return EthType{(*f)[pos], (*f)[pos+1]}
 }
 
-func (f *Frame) MACPayload() ([]byte, uint32) {
-	off := 12 + uint32(f.MACTagging()) + 2
+func (f *Frame) MACPayload(tag VLANTag) ([]byte, uint32) {
+	off := uint32(14 + tag)
 	return (*f)[off:], off
 }
 
-func (f *Frame) GetPayString(frameLen uint32, indent int) string {
-	p, off := f.MACPayload()
+func (f *Frame) GetPayString(frameLen uint32, indent int, tag VLANTag) string {
+	p, off := f.MACPayload(tag)
 	frameLen -= off
 	indent++
-	switch f.MACEthertype() {
+	switch f.MACEthertype(tag) {
 	case ARP:
 		return ARP_P(p).String(indent)
 	case IPv4:
