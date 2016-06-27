@@ -196,6 +196,7 @@ func (f *Frame) String(l uint32, indent int) string {
 	}
 	s += fmt.Sprintf(padLeft("MAC Type   : %s\n", "\t", indent), f.MACEthertype(mT)) +
 		f.GetPayString(l, indent, mT)
+	return s
 }
 
 func (f *Frame) MACSource() net.HardwareAddr {
