@@ -42,7 +42,7 @@ var (
 	SERCOS3             = EthType{0x88, 0xCD}
 	HomePlugAVMME       = EthType{0x88, 0xE1}
 	MRP                 = EthType{0x88, 0xE3}
-	IEEE802_1AE         = EthType{0x88, 0xE5}
+	MACSec              = EthType{0x88, 0xE5}
 	IEEE1588            = EthType{0x88, 0xF7}
 	IEEE802_1ag         = EthType{0x89, 0x02}
 	FCoE                = EthType{0x89, 0x06}
@@ -118,8 +118,8 @@ func (e EthType) String() string {
 		return "HomePlugAVMME"
 	case MRP:
 		return "MRP"
-	case IEEE802_1AE:
-		return "IEEE802_1AE"
+	case MACSec:
+		return "MACSec"
 	case IEEE1588:
 		return "IEEE1588"
 	case IEEE802_1ag:
