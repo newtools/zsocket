@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -123,11 +122,9 @@ type ZSocket struct {
 	txLossDisabled bool
 	txFrameSize    uint32
 	txIndex        int32
-	txWriteLock    *sync.RWMutex
 	txWritten      uint32
-	txWrittenIndex uint32
+	txWrittenIndex int32
 	txPollPointer  uintptr
-	txError        error
 	txFrames       []*ringFrame
 }
 
@@ -221,9 +218,9 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		}
 	}
 	if zs.txEnabled {
-		zs.txWriteLock = &sync.RWMutex{}
 		zs.txFrameSize = zs.frameSize - uint32(_TX_START)
 		zs.txWritten = 0
+		zs.txWrittenIndex = -1
 		pfd := &pollfd{}
 		pfd.fd = zs.socket
 		pfd.events = _POLLERR | _POLLOUT
@@ -236,10 +233,6 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 			tx.txStart = tx.raw[_TX_START:]
 			zs.txFrames = append(zs.txFrames, tx)
 		}
-	} else {
-		// this is an optimization for the write code so that it doesn't
-		// have to check the boolean txEnabled
-		zs.txError = fmt.Errorf("the TX ring is not enabled on this socket")
 	}
 	return zs, nil
 }
@@ -292,11 +285,9 @@ func (zs *ZSocket) WriteToBuffer(buf []byte, l uint32) (int32, error) {
 // be passed the raw TX byes so that custom logic can be applied
 // to copying the frame (for example, encrypting the frame).
 func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byte, l uint32)) (int32, error) {
-	if zs.txError != nil {
-		return -1, zs.txError
+	if !zs.txEnabled {
+		return -1, fmt.Errorf("the TX ring is not enabled on this socket")
 	}
-	zs.txWriteLock.RLock()
-	defer zs.txWriteLock.RUnlock()
 	tx, txIndex, err := zs.getFreeTx()
 	if err != nil {
 		return -1, err
@@ -304,9 +295,10 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byt
 	tx.setTpLen(l)
 	tx.setTpSnapLen(l)
 	copyFx(tx.txStart, buf, l)
-	tx.txSet()
 	if atomic.AddUint32(&zs.txWritten, 1) == 1 {
-		zs.txWrittenIndex = uint32(txIndex)
+		for !atomic.CompareAndSwapInt32(&zs.txWrittenIndex, -1, txIndex) {
+			runtime.Gosched()
+		}
 	}
 	return txIndex, nil
 }
@@ -316,33 +308,38 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byt
 // the TX ring buffer, i.e. all calls to WriteToBuffer and CopyToBuffer
 // will wait for FlushFrames to finish its syscall.
 func (zs *ZSocket) FlushFrames() (uint, error, []error) {
+	written := atomic.SwapUint32(&zs.txWritten, 0)
+	if written == 0 {
+		return 0, nil, nil
+	}
+	index := atomic.SwapInt32(&zs.txWrittenIndex, -1)
 	framesFlushed := uint(0)
+	frameNum := int32(zs.frameNum)
 	z := uintptr(0)
-	zs.txWriteLock.Lock()
-	defer zs.txWriteLock.Unlock()
-	written := zs.txWritten
-	i := zs.txWrittenIndex
-	zs.txWritten = 0
+	for t, w := index, written; w > 0; w-- {
+		zs.txFrames[t].txSet()
+		t = (t + 1) % frameNum
+	}
 	if _, _, e1 := syscall.Syscall6(syscall.SYS_SENDTO, uintptr(zs.socket), z, z, z, z, z); e1 != 0 {
 		return framesFlushed, e1, nil
 	}
 	var errs []error = nil
 	if zs.txLossDisabled {
-		for ; written > 0; written-- {
-			tx := zs.txFrames[i]
+		for t, w := index, written; w > 0; w-- {
+			tx := zs.txFrames[t]
 			if zs.txLossDisabled && tx.txWrongFormat() {
-				errs = append(errs, txIndexError(i))
+				errs = append(errs, txIndexError(t))
 			} else {
 				framesFlushed++
 			}
 			tx.txSetMB()
-			i = (i + 1) % zs.frameNum
+			t = (t + 1) % frameNum
 		}
 	} else {
-		for ; written > 0; written-- {
-			zs.txFrames[i].txSetMB()
+		for t, w := index, written; w > 0; w-- {
+			zs.txFrames[t].txSetMB()
 			framesFlushed++
-			i = (i + 1) % zs.frameNum
+			t = (t + 1) % frameNum
 		}
 	}
 	return framesFlushed, nil, errs
@@ -378,7 +375,7 @@ func (zs *ZSocket) txPoll(timeOut int) error {
 type txIndexError int32
 
 func (ie txIndexError) Error() string {
-	return fmt.Sprintf("tx frame %d had a bad format", ie)
+	return fmt.Sprintf("bad format in tx frame %d", ie)
 }
 
 type tpacketReq struct {
