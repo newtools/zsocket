@@ -124,7 +124,6 @@ type ZSocket struct {
 	txIndex        int32
 	txWritten      uint32
 	txWrittenIndex int32
-	txPollPointer  uintptr
 	txFrames       []*ringFrame
 }
 
@@ -221,11 +220,6 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		zs.txFrameSize = zs.frameSize - uint32(_TX_START)
 		zs.txWritten = 0
 		zs.txWrittenIndex = -1
-		pfd := &pollfd{}
-		pfd.fd = zs.socket
-		pfd.events = _POLLERR | _POLLOUT
-		pfd.revents = 0
-		zs.txPollPointer = uintptr(pfd.getPointer())
 		for t := 0; t < int(zs.frameNum); t, i = t+1, i+1 {
 			frLoc = i * int(zs.frameSize)
 			tx := &ringFrame{}
@@ -354,22 +348,20 @@ func (zs *ZSocket) getFreeTx() (*ringFrame, int32, error) {
 	}
 	tx := zs.txFrames[txIndex]
 	for !tx.txReady() {
-		if err := zs.txPoll(-1); err != nil {
-			return nil, -1, err
+		pfd := &pollfd{}
+		pfd.fd = zs.socket
+		pfd.events = _POLLERR | _POLLOUT
+		pfd.revents = 0
+		timeout := -1
+		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, uintptr(pfd.getPointer()), uintptr(1), uintptr(unsafe.Pointer(&timeout)))
+		if e1 != 0 {
+			return nil, -1, e1
 		}
 	}
 	for !tx.txMBReady() {
 		runtime.Gosched()
 	}
 	return tx, txIndex, nil
-}
-
-func (zs *ZSocket) txPoll(timeOut int) error {
-	_, _, e1 := syscall.Syscall(syscall.SYS_POLL, zs.txPollPointer, uintptr(1), uintptr(unsafe.Pointer(&timeOut)))
-	if e1 != 0 {
-		return e1
-	}
-	return nil
 }
 
 type txIndexError int32
