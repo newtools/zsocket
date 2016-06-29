@@ -231,6 +231,22 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 	return zs, nil
 }
 
+// Returns the maximum amount of frame packets that can be written
+func (zs *ZSocket) MaxPackets() uint32 {
+	return zs.frameNum
+}
+
+// Returns the frame size in bytes
+func (zs *ZSocket) MaxPacketSize() uint32 {
+	return zs.txFrameSize
+}
+
+// Returns the amount of packets, written to the tx ring, that
+// haven't been flushed.
+func (zs *ZSocket) WrittenPackets() uint32 {
+	return atomic.LoadUint32(&zs.txWritten)
+}
+
 // Listen to all specified packets in the RX ring-buffer
 func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 	if !zs.rxEnabled {
