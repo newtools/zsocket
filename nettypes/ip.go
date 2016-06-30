@@ -69,6 +69,8 @@ func (i IPv4_P) PayloadString(frameLen uint32, indent int) string {
 	switch i.Protocol() {
 	case TCP:
 		return TCP_P(p).String(frameLen, indent, i.SourceIP(), i.DestinationIP())
+	case UDP:
+		return UDP_P(p).String(frameLen, indent)
 	case ICMP:
 		return ICMP_P(p).String(frameLen, indent)
 	default:
