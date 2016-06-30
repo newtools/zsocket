@@ -15,8 +15,11 @@ import (
 )
 
 func main() {
-     // args: interface index, options, ring block numbers, packet types
-     zs, err := zsocket.NewZSocket(15, zsocket.ENABLE_RX, 256, nettypes.All)
+     // args: interface index, options, ring block count, frameOrder, framesInBlock packet types
+     // unless you know what you're doing just pay attention to the interface index, whether
+     // or not you want the tx ring, rx ring, or both enabled, and what nettype you are listening
+     // for.
+     zs, err := zsocket.NewZSocket(15, zsocket.ENABLE_RX, 256, zsocket.MAX_ORDER, 4, nettypes.All)
      if err != nil {
         panic(err)
      }
@@ -38,11 +41,11 @@ import (
 )
 
 func main() {
-	zs, err := zsocket.NewZSocket(25, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, nettypes.All)
+	zs, err := zsocket.NewZSocket(25, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, zsocket.MAX_ORDER, 4, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
-	zs2, err := zsocket.NewZSocket(27, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, nettypes.All)
+	zs2, err := zsocket.NewZSocket(27, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, zsocket.MAX_ORDER, 4, nettypes.All)
 	if err != nil {
 		panic(err)
 	}

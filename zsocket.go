@@ -16,6 +16,8 @@ const (
 	ENABLE_RX       = 1 << 0
 	ENABLE_TX       = 1 << 1
 	DISABLE_TX_LOSS = 1 << 2
+	/* linux max order */
+	MAX_ORDER = 11
 )
 
 const (
@@ -135,11 +137,20 @@ type ZSocket struct {
 // size of the ring-buffer can be manipulated with blockNum,
 // which must be a multiple of two. A block corresponds to 8KB.
 // For example, a 256 blockNum would create a 2MB ring-buffer.
+// `frameOrder` is the base 2 order of magnitude increase from
+// TP_ALIGNMENT that you want the frame size to be. Mostly you
+// can think of this argument as being the variable x in the
+// equation 16^x. The number must be between 5 and 12 (not including 5 and 12).
+// `framesInBlock` is the number of frames in a block. It has some complicated
+// contstraints, but the error messages will help you.
 // Finally the ethType can be specified, which will only place
 // packets matching the type in the ring buffer. "All" is an option.
-func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSocket, error) {
+func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethType nettypes.EthType) (*ZSocket, error) {
 	if blockNum%2 != 0 {
 		return nil, fmt.Errorf("blockNum arg must be a multiple of 2")
+	}
+	if frameOrder > MAX_ORDER || frameOrder < 6 {
+		return nil, fmt.Errorf("frameOrder must be smaller than %v and larger than 6", MAX_ORDER)
 	}
 	zs := new(ZSocket)
 
@@ -166,12 +177,13 @@ func NewZSocket(ethIndex, options, blockNum int, ethType nettypes.EthType) (*ZSo
 		return nil, err
 	}
 
-	if blockNum <= 0 {
-		blockNum = 256
-	}
 	req := &tpacketReq{}
-	req.blockSize = uint(os.Getpagesize() << 2)
-	req.frameSize = _TPACKET_ALIGNMENT << 7
+	req.frameSize = _TPACKET_ALIGNMENT << MAX_ORDER
+	pageSize := os.Getpagesize()
+	req.blockSize = req.frameSize * uint(framesInBlock)
+	if req.blockSize%uint(pageSize) > 0 {
+		return nil, fmt.Errorf("given the arguments `frameOrder` of %v and `framesInBlock` of %v, the overall frameSize of zsocket is calculated as %v, in turn the block size of the zsocket buffer is calculated as %v, but block size must be a multiple of the os page size which is %v", frameOrder, framesInBlock, req.frameSize, req.blockSize, pageSize)
+	}
 	req.blockNum = uint(blockNum)
 	req.frameNum = (req.blockSize / req.frameSize) * req.blockNum
 	reqP := req.getPointer()
