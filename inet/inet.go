@@ -1,18 +1,8 @@
 package inet
 
-//#define LONG_SIZE sizeof(long)
-//#define INT_SIZE sizeof(int)
-//#define SHORT_SIZE sizeof(short)
-import "C"
 import (
 	"encoding/binary"
 	"unsafe"
-)
-
-const (
-	HOST_SHORT_SIZE = C.SHORT_SIZE
-	HOST_INT_SIZE   = C.INT_SIZE
-	HOST_LONG_SIZE  = C.LONG_SIZE
 )
 
 var (
