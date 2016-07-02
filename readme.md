@@ -4,7 +4,7 @@ ZSocket is a library that wraps the linux zero-copy socket syscall to create a r
 It also contains some utility functions and types to help with a handful of layer 2, 3, and 4 types.
 It is a lot like libcap, except it has easy to understand facilities for writing (injecting packets) to an interface.
 
-ZSocket doesn't contain or wrap an C/C++, and it is lock free and thread safe.
+ZSocket doesn't contain or wrap any C/C++, and it is lock free and thread safe.
 
 Example
 -------
