@@ -367,6 +367,10 @@ func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 	return framesFlushed, nil, errs
 }
 
+func (zs *ZSocket) Close() error {
+	return syscall.Close(zs.socket)
+}
+
 func (zs *ZSocket) getFreeTx() (*ringFrame, int32, error) {
 	if zs.txWritten == zs.frameNum {
 		return nil, -1, fmt.Errorf("the tx ring buffer is full")
