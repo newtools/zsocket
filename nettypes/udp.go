@@ -8,6 +8,10 @@ import (
 
 type UDP_P []byte
 
+func (t UDP_P) IPProtocol() IPProtocol {
+	return UDP
+}
+
 func (t UDP_P) String(frameLen uint32, indent int) string {
 	return fmt.Sprintf(padLeft("UDP Len      : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Source Port  : %d\n", "\t", indent), t.SourcePort()) +

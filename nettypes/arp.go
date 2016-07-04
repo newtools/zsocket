@@ -19,7 +19,15 @@ func (ao ARPOperation) String() string {
 	return "unknown arp operation"
 }
 
+func NewARP() ARP_P {
+
+}
+
 type ARP_P []byte
+
+func (a ARP_P) EthType() EthType {
+	return ARP
+}
 
 func (a ARP_P) String(indent int) string {
 	return fmt.Sprintf(padLeft("Htype : %02x\n", "\t", indent), a.HardwareType()) +

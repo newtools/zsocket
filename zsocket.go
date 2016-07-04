@@ -110,6 +110,17 @@ func copyFx(dst, src []byte, len uint32) {
 	copy(dst, src)
 }
 
+type IZSocket interface {
+	MaxPackets() uint32
+	MaxPacketSize() uint32
+	WrittenPackets() uint32
+	Listen(fx func(*nettypes.Frame, uint32))
+	WriteToBuffer(buf []byte, l uint32) (int32, error)
+	CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byte, l uint32)) (int32, error)
+	FlushFrames() (uint, error, []error)
+	Close() error
+}
+
 // ZSocket opens a zero copy ring-buffer to the specified interface.
 // Do not manually initialize ZSocket. Use `NewZSocket`.
 type ZSocket struct {
@@ -367,6 +378,7 @@ func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 	return framesFlushed, nil, errs
 }
 
+// Close socket
 func (zs *ZSocket) Close() error {
 	return syscall.Close(zs.socket)
 }

@@ -10,15 +10,19 @@ import (
 type IPProtocol uint8
 
 const (
-	HOPOPT = 0x00
-	ICMP   = 0x01
-	IGMP   = 0x02
-	GGP    = 0x03
-	IPinIP = 0x04
-	ST     = 0x05
-	TCP    = 0x06
-	UDP    = 0x11
+	HOPOPT = IPProtocol(0x00)
+	ICMP   = IPProtocol(0x01)
+	IGMP   = IPProtocol(0x02)
+	GGP    = IPProtocol(0x03)
+	IPinIP = IPProtocol(0x04)
+	ST     = IPProtocol(0x05)
+	TCP    = IPProtocol(0x06)
+	UDP    = IPProtocol(0x11)
 )
+
+func (p IPProtocol) EthType() EthType {
+	return IPv4
+}
 
 func (p IPProtocol) String() string {
 	switch p {
