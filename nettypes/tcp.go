@@ -67,6 +67,10 @@ func (t TCP_P) IPProtocol() IPProtocol {
 	return TCP
 }
 
+func (t TCP_P) Bytes() []byte {
+	return t
+}
+
 func (t TCP_P) String(frameLen uint32, indent int, srcAddr, destAddr net.IP) string {
 	return fmt.Sprintf(padLeft("TCP Len      : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Source Port  : %d\n", "\t", indent), t.SourcePort()) +

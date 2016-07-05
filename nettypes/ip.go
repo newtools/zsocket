@@ -20,10 +20,6 @@ const (
 	UDP    = IPProtocol(0x11)
 )
 
-func (p IPProtocol) EthType() EthType {
-	return IPv4
-}
-
 func (p IPProtocol) String() string {
 	switch p {
 	case HOPOPT:
@@ -48,6 +44,14 @@ func (p IPProtocol) String() string {
 }
 
 type IPv4_P []byte
+
+func (i IPv4_P) EthType() EthType {
+	return IPv4
+}
+
+func (i IPv4_P) Bytes() []byte {
+	return i
+}
 
 func (i IPv4_P) String(frameLen uint32, indent int) string {
 	return fmt.Sprintf(padLeft("IP Len   : %d\n", "\t", indent), frameLen) +

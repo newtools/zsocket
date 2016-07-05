@@ -143,6 +143,10 @@ func (p ICMP_P) IPProtocol() IPProtocol {
 	return ICMP
 }
 
+func (p ICMP_P) Bytes() []byte {
+	return p
+}
+
 func (p ICMP_P) String(frameLen uint32, indent int) string {
 	typ := p.Type()
 	pay, _ := p.Payload()
