@@ -114,7 +114,7 @@ type IZSocket interface {
 	MaxPackets() uint32
 	MaxPacketSize() uint32
 	WrittenPackets() uint32
-	Listen(fx func(*nettypes.Frame, uint32))
+	Listen(fx func(*nettypes.Frame, uint16))
 	WriteToBuffer(buf []byte, l uint32) (int32, error)
 	CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byte, l uint32)) (int32, error)
 	FlushFrames() (uint, error, []error)
@@ -271,7 +271,7 @@ func (zs *ZSocket) WrittenPackets() uint32 {
 }
 
 // Listen to all specified packets in the RX ring-buffer
-func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
+func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint16)) error {
 	if !zs.rxEnabled {
 		return fmt.Errorf("the RX ring is disabled on this socket")
 	}
@@ -497,8 +497,8 @@ func (rf *ringFrame) macStart() uint16 {
 	return inet.Short(rf.raw[_TP_MAC_START:_TP_MAC_STOP])
 }
 
-func (rf *ringFrame) tpLen() uint32 {
-	return inet.Int(rf.raw[_TP_LEN_START:_TP_LEN_STOP])
+func (rf *ringFrame) tpLen() uint16 {
+	return uint16(inet.Int(rf.raw[_TP_LEN_START:_TP_LEN_STOP]))
 }
 
 func (rf *ringFrame) setTpLen(v uint32) {

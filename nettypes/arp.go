@@ -9,6 +9,11 @@ import (
 
 type ARPOperation uint16
 
+const (
+	Request = ARPOperation(0x01)
+	Reply   = ARPOperation(0x02)
+)
+
 func (ao ARPOperation) String() string {
 	switch ao {
 	case 0x01:
