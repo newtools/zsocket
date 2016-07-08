@@ -147,7 +147,7 @@ func (p ICMP_P) Bytes() []byte {
 	return p
 }
 
-func (p ICMP_P) String(frameLen uint32, indent int) string {
+func (p ICMP_P) String(frameLen uint16, indent int) string {
 	typ := p.Type()
 	pay, _ := p.Payload()
 	ps := pay.String(typ, indent)
@@ -174,7 +174,7 @@ func (p ICMP_P) Checksum() uint16 {
 	return inet.NToHS(p[2:4])
 }
 
-func (p ICMP_P) CalculateChecksum(frameLen uint32) uint16 {
+func (p ICMP_P) CalculateChecksum(frameLen uint16) uint16 {
 	cs := uint32(inet.HostByteOrder.Uint16(p[0:2])) +
 		uint32(inet.HostByteOrder.Uint16(p[4:6])) +
 		uint32(inet.HostByteOrder.Uint16(p[6:8]))
@@ -195,8 +195,8 @@ func (p ICMP_P) CalculateChecksum(frameLen uint32) uint16 {
 	return ^uint16(cs)
 }
 
-func (p ICMP_P) Payload() (ICMP_Payload, uint32) {
-	return ICMP_Payload(p[4:]), uint32(4)
+func (p ICMP_P) Payload() (ICMP_Payload, uint16) {
+	return ICMP_Payload(p[4:]), 4
 }
 
 type ICMP_Payload []byte

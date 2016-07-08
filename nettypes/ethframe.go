@@ -183,7 +183,7 @@ func (pcp PCP) String() string {
 
 type Frame []byte
 
-func (f *Frame) String(l uint32, indent int) string {
+func (f *Frame) String(l uint16, indent int) string {
 	s := fmt.Sprintf(padLeft("Mac Len    : %d\n", "\t", indent), l) +
 		fmt.Sprintf(padLeft("MAC Source : %s\n", "\t", indent), f.MACSource()) +
 		fmt.Sprintf(padLeft("MAC Dest   : %s\n", "\t", indent), f.MACDestination())
@@ -231,12 +231,12 @@ func (f *Frame) MACEthertype(tag VLANTag) EthType {
 	return EthType{(*f)[pos], (*f)[pos+1]}
 }
 
-func (f *Frame) MACPayload(tag VLANTag) ([]byte, uint32) {
-	off := uint32(14 + tag)
+func (f *Frame) MACPayload(tag VLANTag) ([]byte, uint16) {
+	off := 14 + uint16(tag)
 	return (*f)[off:], off
 }
 
-func (f *Frame) GetPayString(frameLen uint32, indent int, tag VLANTag) string {
+func (f *Frame) GetPayString(frameLen uint16, indent int, tag VLANTag) string {
 	p, off := f.MACPayload(tag)
 	frameLen -= off
 	indent++

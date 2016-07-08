@@ -53,7 +53,7 @@ func (i IPv4_P) Bytes() []byte {
 	return i
 }
 
-func (i IPv4_P) String(frameLen uint32, indent int) string {
+func (i IPv4_P) String(frameLen uint16, indent int) string {
 	return fmt.Sprintf(padLeft("IP Len   : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Version  : %d\n", "\t", indent), i.Version()) +
 		fmt.Sprintf(padLeft("IHL      : %d\n", "\t", indent), i.IHL()) +
@@ -70,7 +70,7 @@ func (i IPv4_P) String(frameLen uint32, indent int) string {
 		i.PayloadString(frameLen, indent)
 }
 
-func (i IPv4_P) PayloadString(frameLen uint32, indent int) string {
+func (i IPv4_P) PayloadString(frameLen uint16, indent int) string {
 	p, off := i.Payload()
 	frameLen -= off
 	indent++
@@ -170,7 +170,7 @@ func (i IPv4_P) DestinationIP() net.IP {
 	return net.IP(i[16:20])
 }
 
-func (i IPv4_P) Payload() ([]byte, uint32) {
-	off := uint32(i.IHL() * 4)
+func (i IPv4_P) Payload() ([]byte, uint16) {
+	off := uint16(i.IHL() * 4)
 	return i[off:], off
 }

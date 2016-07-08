@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nathanjsweet/zsocket/inet"
 	"github.com/nathanjsweet/zsocket/nettypes"
 )
 
@@ -28,6 +29,8 @@ type FakeInterface struct {
 
 	arpCache     map[string]*arpEntry
 	arpCacheLock *sync.RWMutex
+
+	listen uint32
 }
 
 type IPPacketOut struct {
@@ -38,7 +41,7 @@ type IPPacketOut struct {
 
 type FakeSocket interface {
 	IPProtocol() nettypes.IPProtocol
-	ReceivePacket(nettypes.IPPacket)
+	ReceivePacket(*net.IPAddr, nettypes.IPPacket, uint16)
 	SendPacketChan() chan *IPPacketOut
 }
 
@@ -47,6 +50,23 @@ type sendListener func(*nettypes.Frame, uint16)
 type arpEntry struct {
 	HardwareAddr net.HardwareAddr
 	Time         time.Time
+}
+
+func btsEqual(b1, b2 []byte) bool {
+	b1l, b2l := len(b1), len(b2)
+	if b1l != b2l {
+		return false
+	}
+	for i := 0; i < b1l; i++ {
+		if b1[i] != b2[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func copyFx(dst, src []byte, len uint16) {
+	copy(dst, src)
 }
 
 func NewFakeInterface(localMAC net.HardwareAddr, localIP *net.IPAddr, mtu uint16) (*FakeInterface, error) {
@@ -79,12 +99,13 @@ func (fi *FakeInterface) sendEthPayload(to net.HardwareAddr, packet nettypes.Eth
 	}
 	l := 14 + length
 	frame := nettypes.Frame(make([]byte, l))
+	copy(frame[14:], packet.Bytes()[:length])
+
 	copy(frame[0:6], to)
 	copy(frame[6:12], fi.LocalMAC)
 	et := packet.EthType()
 	frame[12] = et[0]
 	frame[13] = et[1]
-	copy(frame[14:], packet.Bytes()[:length])
 	fi.sendLock.RLock()
 	defer fi.sendLock.RUnlock()
 	wg := sync.WaitGroup{}
@@ -105,9 +126,10 @@ func (fi *FakeInterface) sendIPPayload(to *net.IPAddr, packet nettypes.IPPacket,
 	var backoffBackoff, backoff uint
 	for backoffBackoff, backoff, ha = uint(1), 1, fi.getFromARPCache(to); ha == nil; backoffBackoff, backoff, ha = backoffBackoff<<1, backoff<<backoffBackoff, fi.getFromARPCache(to) {
 		if backoff < 30000 {
-			targetHA := net.HardwareAddr([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
+			targetHA := net.HardwareAddr([]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0})
+			broadcast := net.HardwareAddr([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 			arp, l := ARPPacket(nettypes.Request, nettypes.IPv4, fi.LocalMAC, fi.LocalIP, targetHA, to)
-			fi.sendEthPayload(targetHA, arp, l)
+			fi.sendEthPayload(broadcast, arp, l)
 			time.Sleep(time.Millisecond * time.Duration(backoff))
 		} else {
 			return fmt.Errorf("backoff for ARP request exceeded 30 seconds")
@@ -120,9 +142,11 @@ func (fi *FakeInterface) sendIPPayload(to *net.IPAddr, packet nettypes.IPPacket,
 // This  function will Receive a packet to the interface
 func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16) error {
 	macDest := packet.MACDestination()
+	pLen := length
 	if btsEqual(macDest, fi.LocalMAC) || btsEqual(macDest, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}) {
 		pType := packet.MACEthertype(0)
-		p, l := packet.MACPayload(0)
+		p, mOff := packet.MACPayload(0)
+		pLen -= mOff
 		switch pType {
 		case nettypes.ARP:
 			arp := nettypes.ARP_P(p)
@@ -135,17 +159,19 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 				atomic.AddUint64(&fi.Dropped, 1)
 			}
 			ipProto := ipv4.Protocol()
-			ipPay, ipL := ipv4.Payload()
+			ipPay, ipOff := ipv4.Payload()
+			pLen -= ipOff
+			fromIP := net.IPAddr{ipv4.SourceIP(), ""}
 			switch ipProto {
 			case nettypes.TCP:
 				tcp := nettypes.TCP_P(ipPay)
-				if tcp.CalculateChecksum(ipL, ipv4.SourceIP(), ipv4.DestinationIP()) != tcp.Checksum() {
+				if tcp.CalculateChecksum(pLen, ipv4.SourceIP(), ipv4.DestinationIP()) != tcp.Checksum() {
 					atomic.AddUint64(&fi.Dropped, 1)
 				} else {
 					port := tcp.DestinationPort()
 					fi.socketLock.RLock()
 					if sock, ok := fi.sockets[port]; ok && sock.IPProtocol() == nettypes.TCP {
-						sock.ReceivePacket(nettypes.IPPacket(tcp))
+						sock.ReceivePacket(&fromIP, nettypes.IPPacket(tcp), pLen)
 					}
 					fi.socketLock.RUnlock()
 				}
@@ -158,14 +184,20 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 					port := udp.DestinationPort()
 					fi.socketLock.RLock()
 					if sock, ok := fi.sockets[port]; ok && sock.IPProtocol() == nettypes.UDP {
-						sock.ReceivePacket(nettypes.IPPacket(udp))
+						sock.ReceivePacket(&fromIP, nettypes.IPPacket(udp), pLen)
 					}
 					fi.socketLock.RUnlock()
 				}
 			case nettypes.ICMP:
 				icmp := nettypes.ICMP_P(ipPay)
-				if icmp.CalculateChecksum(ipL) != icmp.Checksum() {
+				if inet.HToNSFS(icmp.CalculateChecksum(pLen)) != icmp.Checksum() {
 					atomic.AddUint64(&fi.Dropped, 1)
+				} else {
+					typ := icmp.Type()
+					if typ == nettypes.EchoRequest {
+						pay, l := ICMPRequestReply(nettypes.EchoReply, 0)
+						fi.sendIPPayload(&fromIP, pay, l)
+					}
 				}
 			}
 		default:
@@ -173,7 +205,6 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 		}
 	} else {
 		atomic.AddUint64(&fi.Dropped, 1)
-		drop = true
 	}
 	return nil
 }
@@ -184,12 +215,12 @@ func (fi *FakeInterface) processIncomingArpRequest(arp nettypes.ARP_P) bool {
 		if btsEqual(arp.TPA(), fi.LocalIP.IP) {
 			ipAddr := net.IPAddr{arp.SPA(), ""}
 			hardwareAddr := arp.SHA()
-			arp, l := ARPPacket(nettypes.Reply, nettypes.IPv4, hardwareAddr, &ipAddr, fi.LocalMAC, fi.LocalIP)
+			arp, l := ARPPacket(nettypes.Reply, nettypes.IPv4, fi.LocalMAC, fi.LocalIP, hardwareAddr, &ipAddr)
 			fi.sendEthPayload(hardwareAddr, arp, l)
 		}
 	} else if oper == nettypes.Reply {
-		hardwareAddr := arp.THA()
-		ipAddr := net.IPAddr{arp.TPA(), ""}
+		hardwareAddr := arp.SHA()
+		ipAddr := net.IPAddr{arp.SPA(), ""}
 		fi.addToARPCache(&ipAddr, hardwareAddr)
 	} else {
 		return false
@@ -201,36 +232,6 @@ func (fi *FakeInterface) sendPacketListener(listener sendListener) {
 	fi.sendLock.Lock()
 	defer fi.sendLock.Unlock()
 	fi.sendListeners = append(fi.sendListeners, listener)
-}
-
-func (fi *FakeInterface) OpenSocket(socket FakeSocket, assignPort bool, port uint16) (uint16, error) {
-	fi.socketLock.Lock()
-	defer fi.socketLock.Unlock()
-	if assignPort {
-		port = fi.getFreePort()
-	} else {
-		fi.portLock.Lock()
-		defer fi.portLock.Unlock()
-		if _, ok := fi.portsInUse[port]; ok {
-			return 0, fmt.Errorf("port %v is already in use", port)
-		}
-	}
-	fi.portsInUse[port] = true
-	fi.socketKill[port] = false
-	fi.sockets[port] = socket
-	go fi.socketLoop(socket, port)
-	return port, nil
-}
-
-func (fi *FakeInterface) CloseSocket(port uint16) error {
-	fi.socketLock.Lock()
-	defer fi.socketLock.Unlock()
-	fi.returnPort(port)
-	delete(fi.socketKill, port)
-	if _, ok := fi.sockets[port]; !ok {
-		return fmt.Errorf("socket is not open")
-	}
-	delete(fi.sockets, port)
 }
 
 func (fi *FakeInterface) getFreePort() uint16 {
@@ -291,47 +292,66 @@ func (fi *FakeInterface) getFromARPCache(ipAddr *net.IPAddr) net.HardwareAddr {
 	return ha.HardwareAddr
 }
 
-func btsEqual(b1, b2 []byte) bool {
-	b1l, b2l := len(b1), len(b2)
-	if b1l != b2l {
-		return false
-	}
-	for i := 0; i < b1l; i++ {
-		if b1[i] != b2[i] {
-			return false
+func (fi *FakeInterface) OpenSocket(socket FakeSocket, assignPort bool, port uint16) (uint16, error) {
+	fi.socketLock.Lock()
+	defer fi.socketLock.Unlock()
+	if assignPort {
+		port = fi.getFreePort()
+	} else {
+		fi.portLock.Lock()
+		defer fi.portLock.Unlock()
+		if _, ok := fi.portsInUse[port]; ok {
+			return 0, fmt.Errorf("port %v is already in use", port)
 		}
 	}
-	return true
+	fi.portsInUse[port] = true
+	fi.socketKill[port] = false
+	fi.sockets[port] = socket
+	go fi.socketLoop(socket, port)
+	return port, nil
+}
+
+func (fi *FakeInterface) CloseSocket(port uint16) error {
+	fi.socketLock.Lock()
+	defer fi.socketLock.Unlock()
+	fi.returnPort(port)
+	delete(fi.socketKill, port)
+	if _, ok := fi.sockets[port]; !ok {
+		return fmt.Errorf("socket is not open")
+	}
+	delete(fi.sockets, port)
+	return nil
 }
 
 func (fi *FakeInterface) MaxPackets() uint32 {
 	return 1000
 }
 
-func (fi *FakeInterface) MaxPacketSize() uint32 {
-	return uint32(fi.MTU)
+func (fi *FakeInterface) MaxPacketSize() uint16 {
+	return uint16(fi.MTU)
 }
 
 func (fi *FakeInterface) WrittenPackets() uint32 {
 	return 0
 }
 
-func (fi *FakeInterface) Listen(fx func(*nettypes.Frame, uint16)) {
+func (fi *FakeInterface) Listen(fx func(*nettypes.Frame, uint16)) error {
+	atomic.SwapUint32(&fi.listen, 1)
 	fi.sendPacketListener(fx)
+	for {
+		if atomic.LoadUint32(&fi.listen) == 0 {
+			return fmt.Errorf("interface socket closed")
+		}
+		time.Sleep(time.Second)
+	}
 }
 
-func copyFx(dst, src []byte, len uint32) {
-	copy(dst, src)
+func (fi *FakeInterface) WriteToBuffer(buf []byte, l uint16) (int32, error) {
+	return fi.CopyToBuffer(buf, l, copyFx)
 }
 
-func (fi *FakeInterface) WriteToBuffer(buf []byte, l uint32) (int32, error) {
-	fi.CopyToBuffer(buf, l, copyFx)
-}
-
-func (fi *FakeInterface) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byte, l uint32)) (int32, error) {
-	bts := make([]byte, l)
-	copyFx(bts, buf, l)
-	err := fi.ReceiveEthPayload(nettypes.Frame(bts), uint16(l))
+func (fi *FakeInterface) CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byte, l uint16)) (int32, error) {
+	err := fi.receiveEthPayload(nettypes.Frame(buf[:l]), uint16(l))
 	if err != nil {
 		return 0, err
 	}
@@ -343,5 +363,6 @@ func (fi *FakeInterface) FlushFrames() (uint, error, []error) {
 }
 
 func (fi *FakeInterface) Close() error {
+	atomic.SwapUint32(&fi.listen, 0)
 	return nil
 }

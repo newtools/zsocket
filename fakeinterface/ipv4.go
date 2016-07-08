@@ -14,7 +14,7 @@ var id uint32 = _STARTING_ID
 
 func IPv4Packet(source, dest *net.IPAddr, proto nettypes.IPProtocol, pay []byte, len uint16) (nettypes.IPv4_P, uint16) {
 	l := 20 + len
-	ipv4 := nettypes.IPv4_P(make([]byte, 20))
+	ipv4 := nettypes.IPv4_P(make([]byte, l))
 	copy(ipv4[20:], pay[:len])
 	// 0100 0101
 	ipv4[0] = 69
@@ -38,7 +38,6 @@ func getNextId() uint16 {
 	if n <= 65535 {
 		return uint16(n)
 	}
-	if !atomic.CompareAndSwapUint32(&id, n, _STARTING_ID) {
-		return getNextId()
-	}
+	atomic.CompareAndSwapUint32(&id, n, _STARTING_ID)
+	return getNextId()
 }
