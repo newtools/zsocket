@@ -195,7 +195,8 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 				} else {
 					typ := icmp.Type()
 					if typ == nettypes.EchoRequest {
-						pay, l := ICMPRequestReply(nettypes.EchoReply, 0)
+						icmpP, icmpOff := icmp.Payload()
+						pay, l := ICMPRequestReply(nettypes.EchoReply, 0, icmpP, pLen-icmpOff)
 						fi.sendIPPayload(&fromIP, pay, l)
 					}
 				}

@@ -150,7 +150,7 @@ func (p ICMP_P) Bytes() []byte {
 func (p ICMP_P) String(frameLen uint16, indent int) string {
 	typ := p.Type()
 	pay, _ := p.Payload()
-	ps := pay.String(typ, indent)
+	ps := pay.String(typ, indent, frameLen-4)
 	s := fmt.Sprintf(padLeft("ICMP Len     : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Type         : %s\n", "\t", indent), typ) +
 		fmt.Sprintf(padLeft("Code         : %s\n", "\t", indent), p.Code().String(typ)) +
@@ -201,7 +201,7 @@ func (p ICMP_P) Payload() (ICMP_Payload, uint16) {
 
 type ICMP_Payload []byte
 
-func (pay ICMP_Payload) String(typ ICMPType, indent int) string {
+func (pay ICMP_Payload) String(typ ICMPType, indent int, length uint16) string {
 	indent++
 	switch typ {
 	case RedirectMessage:
@@ -214,6 +214,12 @@ func (pay ICMP_Payload) String(typ ICMPType, indent int) string {
 			fmt.Sprintf(padLeft("Origin TS   : %d\n", "\t", indent), inet.NToHI(pay[8:12])) +
 			fmt.Sprintf(padLeft("Receive TS  : %d\n", "\t", indent), inet.NToHI(pay[12:16])) +
 			fmt.Sprintf(padLeft("Transmit TS : %d\n", "\t", indent), inet.NToHI(pay[16:20]))
+	default:
+		s := padLeft("", "\t", indent)
+		for i := uint16(0); i < length; i++ {
+			s += fmt.Sprintf("%02x ", pay[i])
+		}
+		s += "\n"
+		return s
 	}
-	return "\n"
 }
