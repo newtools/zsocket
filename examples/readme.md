@@ -11,3 +11,7 @@ This program simply listens to an interface and dumps out what it is receiving i
 
 To set it up simply get the index of the interface you want to listen to using the bash command, `ip link`, and substitute
 it in the program. Run the program with `go run 1printframe.go`, and you should see what the interface is receiving.
+
+Simple Bridge
+-------------
+This program creates a bridge between two interfaces and allows for TCP traffic to pass between them.
