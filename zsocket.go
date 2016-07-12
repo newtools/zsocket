@@ -111,9 +111,9 @@ func copyFx(dst, src []byte, len uint16) {
 }
 
 type IZSocket interface {
-	MaxPackets() uint32
+	MaxPackets() int32
 	MaxPacketSize() uint16
-	WrittenPackets() uint32
+	WrittenPackets() int32
 	Listen(fx func(*nettypes.Frame, uint16))
 	WriteToBuffer(buf []byte, l uint16) (int32, error)
 	CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byte, l uint16)) (int32, error)
@@ -127,7 +127,7 @@ type ZSocket struct {
 	socket         int
 	raw            []byte
 	listening      int32
-	frameNum       uint32
+	frameNum       int32
 	frameSize      uint16
 	rxEnabled      bool
 	rxFrames       []*ringFrame
@@ -135,7 +135,7 @@ type ZSocket struct {
 	txLossDisabled bool
 	txFrameSize    uint16
 	txIndex        int32
-	txWritten      uint32
+	txWritten      int32
 	txWrittenIndex int32
 	txFrames       []*ringFrame
 }
@@ -227,7 +227,7 @@ func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethT
 		return nil, err
 	}
 	zs.raw = bs
-	zs.frameNum = uint32(req.frameNum)
+	zs.frameNum = int32(req.frameNum)
 	zs.frameSize = uint16(req.frameSize)
 	i := 0
 	frLoc := 0
@@ -255,7 +255,7 @@ func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethT
 }
 
 // Returns the maximum amount of frame packets that can be written
-func (zs *ZSocket) MaxPackets() uint32 {
+func (zs *ZSocket) MaxPackets() int32 {
 	return zs.frameNum
 }
 
@@ -266,8 +266,8 @@ func (zs *ZSocket) MaxPacketSize() uint16 {
 
 // Returns the amount of packets, written to the tx ring, that
 // haven't been flushed.
-func (zs *ZSocket) WrittenPackets() uint32 {
-	return atomic.LoadUint32(&zs.txWritten)
+func (zs *ZSocket) WrittenPackets() int32 {
+	return atomic.LoadInt32(&zs.txWritten)
 }
 
 // Listen to all specified packets in the RX ring-buffer
@@ -283,7 +283,7 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint16)) error {
 	pfd.events = _POLLERR | _POLLIN
 	pfd.revents = 0
 	pfdP := uintptr(pfd.getPointer())
-	rxIndex := uint32(0)
+	rxIndex := int32(0)
 	rf := zs.rxFrames[rxIndex]
 	pollTimeout := -1
 	pTOPointer := uintptr(unsafe.Pointer(&pollTimeout))
@@ -328,24 +328,37 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byt
 	tx.setTpLen(l)
 	tx.setTpSnapLen(l)
 	copyFx(tx.txStart, buf, l)
-	if atomic.AddUint32(&zs.txWritten, 1) == 1 {
-		for !atomic.CompareAndSwapInt32(&zs.txWrittenIndex, -1, txIndex) {
-			runtime.Gosched()
-		}
+	written := atomic.AddInt32(&zs.txWritten, 1)
+	if written == 1 {
+		atomic.SwapInt32(&zs.txWrittenIndex, txIndex)
 	}
 	return txIndex, nil
 }
 
 // FlushFrames tells the kernel to flush all packets written
-// to the TX ring buffer. This function "stops the world" for
-// the TX ring buffer, i.e. all calls to WriteToBuffer and CopyToBuffer
-// will wait for FlushFrames to finish its syscall.
+// to the TX ring buffer.n
 func (zs *ZSocket) FlushFrames() (uint, error, []error) {
-	written := atomic.SwapUint32(&zs.txWritten, 0)
-	if written == 0 {
-		return 0, nil, nil
+	if !zs.txEnabled {
+		return 0, fmt.Errorf("the TX ring is not enabled on this socket, there is nothing to flush"), nil
 	}
-	index := atomic.SwapInt32(&zs.txWrittenIndex, -1)
+	var index int32
+	for {
+		index = atomic.LoadInt32(&zs.txWrittenIndex)
+		if index == -1 {
+			return 0, nil, nil
+		}
+		if !atomic.CompareAndSwapInt32(&zs.txWrittenIndex, index, -1) {
+			continue
+		}
+		break
+
+	}
+	written := atomic.SwapInt32(&zs.txWritten, 0)
+	// this shouldn't happen given the index swapping logic above,
+	// but I'm a coward so we'll check anyways.
+	if written == 0 {
+		return 0, fmt.Errorf("race condition on the TX ring occured"), nil
+	}
 	framesFlushed := uint(0)
 	frameNum := int32(zs.frameNum)
 	z := uintptr(0)
@@ -384,11 +397,11 @@ func (zs *ZSocket) Close() error {
 }
 
 func (zs *ZSocket) getFreeTx() (*ringFrame, int32, error) {
-	if zs.txWritten == zs.frameNum {
+	if atomic.LoadInt32(&zs.txWritten) == zs.frameNum {
 		return nil, -1, fmt.Errorf("the tx ring buffer is full")
 	}
 	var txIndex int32
-	for txIndex = zs.txIndex; !atomic.CompareAndSwapInt32(&zs.txIndex, txIndex, (txIndex+1)%int32(zs.frameNum)); txIndex = zs.txIndex {
+	for txIndex = atomic.LoadInt32(&zs.txIndex); !atomic.CompareAndSwapInt32(&zs.txIndex, txIndex, (txIndex+1)%int32(zs.frameNum)); txIndex = atomic.LoadInt32(&zs.txIndex) {
 	}
 	tx := zs.txFrames[txIndex]
 	for !tx.txReady() {

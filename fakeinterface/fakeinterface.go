@@ -16,11 +16,10 @@ type FakeInterface struct {
 	LocalMAC net.HardwareAddr
 	LocalIP  *net.IPAddr
 	MTU      uint16
-	Dropped  uint64
 
 	sendListeners []sendListener
 	sendLock      *sync.RWMutex
-	sockets       map[uint16]FakeSocket
+	sockets       map[uint16]FakeIPSocket
 	socketKill    map[uint16]bool
 	socketLock    *sync.RWMutex
 
@@ -31,6 +30,23 @@ type FakeInterface struct {
 	arpCacheLock *sync.RWMutex
 
 	listen uint32
+
+	name string
+
+	rxPackets,
+	rxBytes,
+	rxErrors,
+	rxDropped,
+	rxOverruns,
+	rxFrame uint64
+
+	txPackets,
+	txBytes,
+	txErrors,
+	txDropped,
+	txOverruns,
+	txCarrier,
+	txCollision uint64
 }
 
 type IPPacketOut struct {
@@ -39,7 +55,7 @@ type IPPacketOut struct {
 	Len      uint16
 }
 
-type FakeSocket interface {
+type FakeIPSocket interface {
 	IPProtocol() nettypes.IPProtocol
 	ReceivePacket(*net.IPAddr, nettypes.IPPacket, uint16)
 	SendPacketChan() chan *IPPacketOut
@@ -69,7 +85,43 @@ func copyFx(dst, src []byte, len uint16) {
 	copy(dst, src)
 }
 
-func NewFakeInterface(localMAC net.HardwareAddr, localIP *net.IPAddr, mtu uint16) (*FakeInterface, error) {
+type byteSize float64
+
+const (
+	_           = iota // ignore first value by assigning to blank identifier
+	kB byteSize = 1 << (10 * iota)
+	mB
+	gB
+	tB
+	pB
+	eB
+	zB
+	yB
+)
+
+func (b byteSize) String() string {
+	switch {
+	case b >= yB:
+		return fmt.Sprintf("%.1fYB", b/yB)
+	case b >= zB:
+		return fmt.Sprintf("%.1fZB", b/zB)
+	case b >= eB:
+		return fmt.Sprintf("%.1fEB", b/eB)
+	case b >= pB:
+		return fmt.Sprintf("%.1fPB", b/pB)
+	case b >= tB:
+		return fmt.Sprintf("%.1fTB", b/tB)
+	case b >= gB:
+		return fmt.Sprintf("%.1fGB", b/gB)
+	case b >= mB:
+		return fmt.Sprintf("%.1fMB", b/mB)
+	case b >= kB:
+		return fmt.Sprintf("%.1fKB", b/kB)
+	}
+	return fmt.Sprintf("%.1fB", b)
+}
+
+func NewFakeInterface(name string, localMAC net.HardwareAddr, localIP *net.IPAddr, mtu uint16) (*FakeInterface, error) {
 	if localMAC == nil {
 		return nil, fmt.Errorf("must assign a mac address")
 	}
@@ -89,18 +141,22 @@ func NewFakeInterface(localMAC net.HardwareAddr, localIP *net.IPAddr, mtu uint16
 
 	fi.arpCache = make(map[string]*arpEntry)
 	fi.arpCacheLock = &sync.RWMutex{}
+
+	fi.name = name
 	return fi, nil
 }
 
 // This function will Send a packet from the interface
 func (fi *FakeInterface) sendEthPayload(to net.HardwareAddr, packet nettypes.EthPacket, length uint16) error {
-	if length > fi.MTU {
+	l := 14 + length
+	atomic.AddUint64(&fi.txPackets, 1)
+	atomic.AddUint64(&fi.txBytes, uint64(l))
+	if l > fi.MTU {
+		atomic.AddUint64(&fi.txOverruns, 1)
 		return fmt.Errorf("packet length cannot exceed MTU")
 	}
-	l := 14 + length
 	frame := nettypes.Frame(make([]byte, l))
 	copy(frame[14:], packet.Bytes()[:length])
-
 	copy(frame[0:6], to)
 	copy(frame[6:12], fi.LocalMAC)
 	et := packet.EthType()
@@ -120,11 +176,10 @@ func (fi *FakeInterface) sendEthPayload(to net.HardwareAddr, packet nettypes.Eth
 	return nil
 }
 
-// This function will Send a packet from the interface
 func (fi *FakeInterface) sendIPPayload(to *net.IPAddr, packet nettypes.IPPacket, len uint16) error {
 	var ha net.HardwareAddr
 	var backoffBackoff, backoff uint
-	for backoffBackoff, backoff, ha = uint(1), 1, fi.getFromARPCache(to); ha == nil; backoffBackoff, backoff, ha = backoffBackoff<<1, backoff<<backoffBackoff, fi.getFromARPCache(to) {
+	for backoffBackoff, backoff, ha = uint(1), 8, fi.getFromARPCache(to); ha == nil; backoffBackoff, backoff, ha = backoffBackoff<<1, backoff<<backoffBackoff, fi.getFromARPCache(to) {
 		if backoff < 30000 {
 			targetHA := net.HardwareAddr([]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0})
 			broadcast := net.HardwareAddr([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
@@ -139,8 +194,9 @@ func (fi *FakeInterface) sendIPPayload(to *net.IPAddr, packet nettypes.IPPacket,
 	return fi.sendEthPayload(ha, ipv4, l)
 }
 
-// This  function will Receive a packet to the interface
 func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16) error {
+	atomic.AddUint64(&fi.rxPackets, 1)
+	atomic.AddUint64(&fi.rxBytes, uint64(length))
 	macDest := packet.MACDestination()
 	pLen := length
 	if btsEqual(macDest, fi.LocalMAC) || btsEqual(macDest, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}) {
@@ -151,12 +207,12 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 		case nettypes.ARP:
 			arp := nettypes.ARP_P(p)
 			if !fi.processIncomingArpRequest(arp) {
-				atomic.AddUint64(&fi.Dropped, 1)
+				atomic.AddUint64(&fi.rxDropped, 1)
 			}
 		case nettypes.IPv4:
 			ipv4 := nettypes.IPv4_P(p)
 			if ipv4.PacketCorrupt() {
-				atomic.AddUint64(&fi.Dropped, 1)
+				atomic.AddUint64(&fi.rxDropped, 1)
 			}
 			ipProto := ipv4.Protocol()
 			ipPay, ipOff := ipv4.Payload()
@@ -166,7 +222,7 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 			case nettypes.TCP:
 				tcp := nettypes.TCP_P(ipPay)
 				if tcp.CalculateChecksum(pLen, ipv4.SourceIP(), ipv4.DestinationIP()) != tcp.Checksum() {
-					atomic.AddUint64(&fi.Dropped, 1)
+					atomic.AddUint64(&fi.rxDropped, 1)
 				} else {
 					port := tcp.DestinationPort()
 					fi.socketLock.RLock()
@@ -179,7 +235,7 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 				udp := nettypes.UDP_P(ipPay)
 				csum := udp.Checksum()
 				if csum != 0 && csum != udp.CalculateChecksum() {
-					atomic.AddUint64(&fi.Dropped, 1)
+					atomic.AddUint64(&fi.rxDropped, 1)
 				} else {
 					port := udp.DestinationPort()
 					fi.socketLock.RLock()
@@ -191,7 +247,7 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 			case nettypes.ICMP:
 				icmp := nettypes.ICMP_P(ipPay)
 				if inet.HToNSFS(icmp.CalculateChecksum(pLen)) != icmp.Checksum() {
-					atomic.AddUint64(&fi.Dropped, 1)
+					atomic.AddUint64(&fi.rxDropped, 1)
 				} else {
 					typ := icmp.Type()
 					if typ == nettypes.EchoRequest {
@@ -202,10 +258,11 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 				}
 			}
 		default:
+			atomic.AddUint64(&fi.rxErrors, 1)
 			return fmt.Errorf("unsupported type %s", pType)
 		}
 	} else {
-		atomic.AddUint64(&fi.Dropped, 1)
+		atomic.AddUint64(&fi.rxDropped, 1)
 	}
 	return nil
 }
@@ -255,7 +312,7 @@ func (fi *FakeInterface) returnPort(p uint16) {
 	delete(fi.portsInUse, p)
 }
 
-func (fi *FakeInterface) socketLoop(socket FakeSocket, port uint16) {
+func (fi *FakeInterface) socketLoop(socket FakeIPSocket, port uint16) {
 	ch := socket.SendPacketChan()
 	for {
 		fi.socketLock.RLock()
@@ -293,7 +350,7 @@ func (fi *FakeInterface) getFromARPCache(ipAddr *net.IPAddr) net.HardwareAddr {
 	return ha.HardwareAddr
 }
 
-func (fi *FakeInterface) OpenSocket(socket FakeSocket, assignPort bool, port uint16) (uint16, error) {
+func (fi *FakeInterface) OpenSocket(socket FakeIPSocket, assignPort bool, port uint16) (uint16, error) {
 	fi.socketLock.Lock()
 	defer fi.socketLock.Unlock()
 	if assignPort {
@@ -366,4 +423,26 @@ func (fi *FakeInterface) FlushFrames() (uint, error, []error) {
 func (fi *FakeInterface) Close() error {
 	atomic.SwapUint32(&fi.listen, 0)
 	return nil
+}
+
+func (fi *FakeInterface) String() string {
+	var status string
+	if atomic.LoadUint32(&fi.listen) == 1 {
+		status = "UP,RUNNING"
+	} else {
+		status = "DOWN"
+	}
+	rxBytes := atomic.LoadUint64(&fi.rxBytes)
+	rxBytesF := byteSize(float64(rxBytes))
+	txBytes := atomic.LoadUint64(&fi.txBytes)
+	txBytesF := byteSize(float64(txBytes))
+	return fmt.Sprintf("%s: ", fi.name) + fmt.Sprintf("flags=4163<%s> mtu %v\n", status, fi.MTU) +
+		fmt.Sprintf("\tinet %s prefixlen 64 scopeid 0x20<link>\n", fi.LocalIP) +
+		fmt.Sprintf("\tether %s txqueuelen 1000 (Ethernet)\n", fi.LocalMAC) +
+		fmt.Sprintf("\tRX packets %d bytes %d (%s)\n", atomic.LoadUint64(&fi.rxPackets), rxBytes, rxBytesF) +
+		fmt.Sprintf("\tRX errors %d dropped %d overruns %d frame %d\n", atomic.LoadUint64(&fi.rxErrors),
+			atomic.LoadUint64(&fi.rxDropped), atomic.LoadUint64(&fi.rxOverruns), atomic.LoadUint64(&fi.rxFrame)) +
+		fmt.Sprintf("\tTX packets %d bytes %d (%s)\n", atomic.LoadUint64(&fi.txPackets), txBytes, txBytesF) +
+		fmt.Sprintf("\tTX errors %d dropped %d overruns %d carrier %d collision %d\n", atomic.LoadUint64(&fi.txErrors),
+			atomic.LoadUint64(&fi.txDropped), atomic.LoadUint64(&fi.txOverruns), atomic.LoadUint64(&fi.txCarrier), atomic.LoadUint64(&fi.txCollision))
 }
