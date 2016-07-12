@@ -8,17 +8,17 @@ import (
 )
 
 func main() {
-	zs, err := zsocket.NewZSocket(25, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, zsocket.MAX_ORDER, 4, nettypes.All)
+	zs, err := zsocket.NewZSocket(18, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, zsocket.MAX_ORDER, 4, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
-	zs2, err := zsocket.NewZSocket(27, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, zsocket.MAX_ORDER, 4, nettypes.All)
+	zs2, err := zsocket.NewZSocket(22, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, zsocket.MAX_ORDER, 4, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
-	go zs.Listen(func(f *nettypes.Frame, frameLen uint32) {
+	go zs.Listen(func(f *nettypes.Frame, frameLen uint16) {
 		processFrame(f, frameLen)
-		fmt.Println("25:")
+		fmt.Println("18:")
 		fmt.Println(f.String(frameLen, 0))
 		_, err := zs2.WriteToBuffer(*f, frameLen)
 		if err != nil {
@@ -32,9 +32,9 @@ func main() {
 			panic(errs)
 		}
 	})
-	zs2.Listen(func(f *nettypes.Frame, frameLen uint32) {
+	zs2.Listen(func(f *nettypes.Frame, frameLen uint16) {
 		processFrame(f, frameLen)
-		fmt.Println("27:")
+		fmt.Println("22:")
 		fmt.Println(f.String(frameLen, 0))
 		_, err := zs.WriteToBuffer(*f, frameLen)
 		if err != nil {
@@ -50,10 +50,10 @@ func main() {
 	})
 }
 
-func processFrame(f *nettypes.Frame, frameLen uint32) {
-	if f.MACEthertype() == nettypes.IPv4 {
+func processFrame(f *nettypes.Frame, frameLen uint16) {
+	if f.MACEthertype(0) == nettypes.IPv4 {
 		ln := frameLen
-		mPay, mOff := f.MACPayload()
+		mPay, mOff := f.MACPayload(0)
 		ln -= mOff
 		ip := nettypes.IPv4_P(mPay)
 		if ip.Protocol() == nettypes.TCP {
