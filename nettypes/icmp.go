@@ -139,10 +139,18 @@ func (i ICMPCode) String(typ ICMPType) string {
 
 type ICMP_P []byte
 
-func (p ICMP_P) String(frameLen uint32, indent int) string {
+func (p ICMP_P) IPProtocol() IPProtocol {
+	return ICMP
+}
+
+func (p ICMP_P) Bytes() []byte {
+	return p
+}
+
+func (p ICMP_P) String(frameLen uint16, indent int) string {
 	typ := p.Type()
 	pay, _ := p.Payload()
-	ps := pay.String(typ, indent)
+	ps := pay.String(typ, indent, frameLen-4)
 	s := fmt.Sprintf(padLeft("ICMP Len     : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Type         : %s\n", "\t", indent), typ) +
 		fmt.Sprintf(padLeft("Code         : %s\n", "\t", indent), p.Code().String(typ)) +
@@ -166,7 +174,7 @@ func (p ICMP_P) Checksum() uint16 {
 	return inet.NToHS(p[2:4])
 }
 
-func (p ICMP_P) CalculateChecksum(frameLen uint32) uint16 {
+func (p ICMP_P) CalculateChecksum(frameLen uint16) uint16 {
 	cs := uint32(inet.HostByteOrder.Uint16(p[0:2])) +
 		uint32(inet.HostByteOrder.Uint16(p[4:6])) +
 		uint32(inet.HostByteOrder.Uint16(p[6:8]))
@@ -187,13 +195,13 @@ func (p ICMP_P) CalculateChecksum(frameLen uint32) uint16 {
 	return ^uint16(cs)
 }
 
-func (p ICMP_P) Payload() (ICMP_Payload, uint32) {
-	return ICMP_Payload(p[4:]), uint32(4)
+func (p ICMP_P) Payload() (ICMP_Payload, uint16) {
+	return ICMP_Payload(p[4:]), 4
 }
 
 type ICMP_Payload []byte
 
-func (pay ICMP_Payload) String(typ ICMPType, indent int) string {
+func (pay ICMP_Payload) String(typ ICMPType, indent int, length uint16) string {
 	indent++
 	switch typ {
 	case RedirectMessage:
@@ -206,6 +214,12 @@ func (pay ICMP_Payload) String(typ ICMPType, indent int) string {
 			fmt.Sprintf(padLeft("Origin TS   : %d\n", "\t", indent), inet.NToHI(pay[8:12])) +
 			fmt.Sprintf(padLeft("Receive TS  : %d\n", "\t", indent), inet.NToHI(pay[12:16])) +
 			fmt.Sprintf(padLeft("Transmit TS : %d\n", "\t", indent), inet.NToHI(pay[16:20]))
+	default:
+		s := padLeft("", "\t", indent)
+		for i := uint16(0); i < length; i++ {
+			s += fmt.Sprintf("%02x ", pay[i])
+		}
+		s += "\n"
+		return s
 	}
-	return "\n"
 }

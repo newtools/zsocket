@@ -9,6 +9,11 @@ import (
 
 type ARPOperation uint16
 
+const (
+	Request = ARPOperation(0x01)
+	Reply   = ARPOperation(0x02)
+)
+
 func (ao ARPOperation) String() string {
 	switch ao {
 	case 0x01:
@@ -20,6 +25,14 @@ func (ao ARPOperation) String() string {
 }
 
 type ARP_P []byte
+
+func (a ARP_P) EthType() EthType {
+	return ARP
+}
+
+func (a ARP_P) Bytes() []byte {
+	return a
+}
 
 func (a ARP_P) String(indent int) string {
 	return fmt.Sprintf(padLeft("Htype : %02x\n", "\t", indent), a.HardwareType()) +

@@ -106,8 +106,19 @@ func errnoErr(e syscall.Errno) error {
 	return e
 }
 
-func copyFx(dst, src []byte, len uint32) {
+func copyFx(dst, src []byte, len uint16) {
 	copy(dst, src)
+}
+
+type IZSocket interface {
+	MaxPackets() int32
+	MaxPacketSize() uint16
+	WrittenPackets() int32
+	Listen(fx func(*nettypes.Frame, uint16))
+	WriteToBuffer(buf []byte, l uint16) (int32, error)
+	CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byte, l uint16)) (int32, error)
+	FlushFrames() (uint, error, []error)
+	Close() error
 }
 
 // ZSocket opens a zero copy ring-buffer to the specified interface.
@@ -116,15 +127,15 @@ type ZSocket struct {
 	socket         int
 	raw            []byte
 	listening      int32
-	frameNum       uint32
-	frameSize      uint32
+	frameNum       int32
+	frameSize      uint16
 	rxEnabled      bool
 	rxFrames       []*ringFrame
 	txEnabled      bool
 	txLossDisabled bool
-	txFrameSize    uint32
+	txFrameSize    uint16
 	txIndex        int32
-	txWritten      uint32
+	txWritten      int32
 	txWrittenIndex int32
 	txFrames       []*ringFrame
 }
@@ -216,8 +227,8 @@ func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethT
 		return nil, err
 	}
 	zs.raw = bs
-	zs.frameNum = uint32(req.frameNum)
-	zs.frameSize = uint32(req.frameSize)
+	zs.frameNum = int32(req.frameNum)
+	zs.frameSize = uint16(req.frameSize)
 	i := 0
 	frLoc := 0
 	if zs.rxEnabled {
@@ -229,7 +240,7 @@ func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethT
 		}
 	}
 	if zs.txEnabled {
-		zs.txFrameSize = zs.frameSize - uint32(_TX_START)
+		zs.txFrameSize = zs.frameSize - uint16(_TX_START)
 		zs.txWritten = 0
 		zs.txWrittenIndex = -1
 		for t := 0; t < int(zs.frameNum); t, i = t+1, i+1 {
@@ -244,23 +255,23 @@ func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethT
 }
 
 // Returns the maximum amount of frame packets that can be written
-func (zs *ZSocket) MaxPackets() uint32 {
+func (zs *ZSocket) MaxPackets() int32 {
 	return zs.frameNum
 }
 
 // Returns the frame size in bytes
-func (zs *ZSocket) MaxPacketSize() uint32 {
+func (zs *ZSocket) MaxPacketSize() uint16 {
 	return zs.txFrameSize
 }
 
 // Returns the amount of packets, written to the tx ring, that
 // haven't been flushed.
-func (zs *ZSocket) WrittenPackets() uint32 {
-	return atomic.LoadUint32(&zs.txWritten)
+func (zs *ZSocket) WrittenPackets() int32 {
+	return atomic.LoadInt32(&zs.txWritten)
 }
 
 // Listen to all specified packets in the RX ring-buffer
-func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
+func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint16)) error {
 	if !zs.rxEnabled {
 		return fmt.Errorf("the RX ring is disabled on this socket")
 	}
@@ -272,7 +283,7 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 	pfd.events = _POLLERR | _POLLIN
 	pfd.revents = 0
 	pfdP := uintptr(pfd.getPointer())
-	rxIndex := uint32(0)
+	rxIndex := int32(0)
 	rf := zs.rxFrames[rxIndex]
 	pollTimeout := -1
 	pTOPointer := uintptr(unsafe.Pointer(&pollTimeout))
@@ -292,12 +303,12 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint32)) error {
 
 // WriteToBuffer writes a raw frame in bytes to the TX ring buffer.
 // The length of the frame must be specified.
-func (zs *ZSocket) WriteToBuffer(buf []byte, l uint32) (int32, error) {
+func (zs *ZSocket) WriteToBuffer(buf []byte, l uint16) (int32, error) {
 	if l > zs.txFrameSize {
 		return -1, fmt.Errorf("the length of the write exceeds the size of the TX frame")
 	}
 	if l < 0 {
-		return zs.CopyToBuffer(buf, uint32(len(buf)), copyFx)
+		return zs.CopyToBuffer(buf, uint16(len(buf)), copyFx)
 	}
 	return zs.CopyToBuffer(buf[:l], l, copyFx)
 }
@@ -306,7 +317,7 @@ func (zs *ZSocket) WriteToBuffer(buf []byte, l uint32) (int32, error) {
 // ring buffer. However, it can take a function argument, that will
 // be passed the raw TX byes so that custom logic can be applied
 // to copying the frame (for example, encrypting the frame).
-func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byte, l uint32)) (int32, error) {
+func (zs *ZSocket) CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byte, l uint16)) (int32, error) {
 	if !zs.txEnabled {
 		return -1, fmt.Errorf("the TX ring is not enabled on this socket")
 	}
@@ -317,24 +328,37 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint32, copyFx func(dst, src []byt
 	tx.setTpLen(l)
 	tx.setTpSnapLen(l)
 	copyFx(tx.txStart, buf, l)
-	if atomic.AddUint32(&zs.txWritten, 1) == 1 {
-		for !atomic.CompareAndSwapInt32(&zs.txWrittenIndex, -1, txIndex) {
-			runtime.Gosched()
-		}
+	written := atomic.AddInt32(&zs.txWritten, 1)
+	if written == 1 {
+		atomic.SwapInt32(&zs.txWrittenIndex, txIndex)
 	}
 	return txIndex, nil
 }
 
 // FlushFrames tells the kernel to flush all packets written
-// to the TX ring buffer. This function "stops the world" for
-// the TX ring buffer, i.e. all calls to WriteToBuffer and CopyToBuffer
-// will wait for FlushFrames to finish its syscall.
+// to the TX ring buffer.n
 func (zs *ZSocket) FlushFrames() (uint, error, []error) {
-	written := atomic.SwapUint32(&zs.txWritten, 0)
-	if written == 0 {
-		return 0, nil, nil
+	if !zs.txEnabled {
+		return 0, fmt.Errorf("the TX ring is not enabled on this socket, there is nothing to flush"), nil
 	}
-	index := atomic.SwapInt32(&zs.txWrittenIndex, -1)
+	var index int32
+	for {
+		index = atomic.LoadInt32(&zs.txWrittenIndex)
+		if index == -1 {
+			return 0, nil, nil
+		}
+		if !atomic.CompareAndSwapInt32(&zs.txWrittenIndex, index, -1) {
+			continue
+		}
+		break
+
+	}
+	written := atomic.SwapInt32(&zs.txWritten, 0)
+	// this shouldn't happen given the index swapping logic above,
+	// but I'm a coward so we'll check anyways.
+	if written == 0 {
+		return 0, fmt.Errorf("race condition on the TX ring occured"), nil
+	}
 	framesFlushed := uint(0)
 	frameNum := int32(zs.frameNum)
 	z := uintptr(0)
@@ -367,16 +391,17 @@ func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 	return framesFlushed, nil, errs
 }
 
+// Close socket
 func (zs *ZSocket) Close() error {
 	return syscall.Close(zs.socket)
 }
 
 func (zs *ZSocket) getFreeTx() (*ringFrame, int32, error) {
-	if zs.txWritten == zs.frameNum {
+	if atomic.LoadInt32(&zs.txWritten) == zs.frameNum {
 		return nil, -1, fmt.Errorf("the tx ring buffer is full")
 	}
 	var txIndex int32
-	for txIndex = zs.txIndex; !atomic.CompareAndSwapInt32(&zs.txIndex, txIndex, (txIndex+1)%int32(zs.frameNum)); txIndex = zs.txIndex {
+	for txIndex = atomic.LoadInt32(&zs.txIndex); !atomic.CompareAndSwapInt32(&zs.txIndex, txIndex, (txIndex+1)%int32(zs.frameNum)); txIndex = atomic.LoadInt32(&zs.txIndex) {
 	}
 	tx := zs.txFrames[txIndex]
 	for !tx.txReady() {
@@ -485,16 +510,16 @@ func (rf *ringFrame) macStart() uint16 {
 	return inet.Short(rf.raw[_TP_MAC_START:_TP_MAC_STOP])
 }
 
-func (rf *ringFrame) tpLen() uint32 {
-	return inet.Int(rf.raw[_TP_LEN_START:_TP_LEN_STOP])
+func (rf *ringFrame) tpLen() uint16 {
+	return uint16(inet.Int(rf.raw[_TP_LEN_START:_TP_LEN_STOP]))
 }
 
-func (rf *ringFrame) setTpLen(v uint32) {
-	inet.PutInt(rf.raw[_TP_LEN_START:_TP_LEN_STOP], v)
+func (rf *ringFrame) setTpLen(v uint16) {
+	inet.PutInt(rf.raw[_TP_LEN_START:_TP_LEN_STOP], uint32(v))
 }
 
-func (rf *ringFrame) setTpSnapLen(v uint32) {
-	inet.PutInt(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP], v)
+func (rf *ringFrame) setTpSnapLen(v uint16) {
+	inet.PutInt(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP], uint32(v))
 }
 
 func (rf *ringFrame) rxReady() bool {

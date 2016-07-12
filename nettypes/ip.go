@@ -10,14 +10,14 @@ import (
 type IPProtocol uint8
 
 const (
-	HOPOPT = 0x00
-	ICMP   = 0x01
-	IGMP   = 0x02
-	GGP    = 0x03
-	IPinIP = 0x04
-	ST     = 0x05
-	TCP    = 0x06
-	UDP    = 0x11
+	HOPOPT = IPProtocol(0x00)
+	ICMP   = IPProtocol(0x01)
+	IGMP   = IPProtocol(0x02)
+	GGP    = IPProtocol(0x03)
+	IPinIP = IPProtocol(0x04)
+	ST     = IPProtocol(0x05)
+	TCP    = IPProtocol(0x06)
+	UDP    = IPProtocol(0x11)
 )
 
 func (p IPProtocol) String() string {
@@ -45,7 +45,15 @@ func (p IPProtocol) String() string {
 
 type IPv4_P []byte
 
-func (i IPv4_P) String(frameLen uint32, indent int) string {
+func (i IPv4_P) EthType() EthType {
+	return IPv4
+}
+
+func (i IPv4_P) Bytes() []byte {
+	return i
+}
+
+func (i IPv4_P) String(frameLen uint16, indent int) string {
 	return fmt.Sprintf(padLeft("IP Len   : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Version  : %d\n", "\t", indent), i.Version()) +
 		fmt.Sprintf(padLeft("IHL      : %d\n", "\t", indent), i.IHL()) +
@@ -62,7 +70,7 @@ func (i IPv4_P) String(frameLen uint32, indent int) string {
 		i.PayloadString(frameLen, indent)
 }
 
-func (i IPv4_P) PayloadString(frameLen uint32, indent int) string {
+func (i IPv4_P) PayloadString(frameLen uint16, indent int) string {
 	p, off := i.Payload()
 	frameLen -= off
 	indent++
@@ -162,7 +170,7 @@ func (i IPv4_P) DestinationIP() net.IP {
 	return net.IP(i[16:20])
 }
 
-func (i IPv4_P) Payload() ([]byte, uint32) {
-	off := uint32(i.IHL() * 4)
+func (i IPv4_P) Payload() ([]byte, uint16) {
+	off := uint16(i.IHL() * 4)
 	return i[off:], off
 }

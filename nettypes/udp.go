@@ -8,7 +8,15 @@ import (
 
 type UDP_P []byte
 
-func (t UDP_P) String(frameLen uint32, indent int) string {
+func (t UDP_P) IPProtocol() IPProtocol {
+	return UDP
+}
+
+func (t UDP_P) Bytes() []byte {
+	return t
+}
+
+func (t UDP_P) String(frameLen uint16, indent int) string {
 	return fmt.Sprintf(padLeft("UDP Len      : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Source Port  : %d\n", "\t", indent), t.SourcePort()) +
 		fmt.Sprintf(padLeft("Dest Port    : %d\n", "\t", indent), t.DestinationPort()) +
@@ -59,6 +67,6 @@ func (t UDP_P) SetChecksum(v uint16) {
 	inet.PutShort(t[6:8], v)
 }
 
-func (t UDP_P) Payload() ([]byte, uint32) {
+func (t UDP_P) Payload() ([]byte, uint16) {
 	return t[8:], 8
 }
