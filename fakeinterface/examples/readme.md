@@ -1,13 +1,11 @@
-ZSocket Examples
-################
+FakeInterface Examples
+######################
 
 Some examples create complex networking scenarios. A good way to create these is to use docker and network namespaces to create virtual ethernet interfaces
 and then use the index of the "outside" interface to open a zsocket (virtual interfaces, in linux, can have a zero-copy socket opened on them just like
 a regular interface). For more on how this works checkout [the vethpair creation script](https://github.com/nathanjsweet/zsocket/tree/utils) in this repo.
 
-Print Frame
------------
-This program simply listens to an interface and dumps out what it is receiving in its RX ring (what packets it is receiving).
+Simple Bridge
+-------------
+Creates a virtual bridge between to interfaces. If you ping with the non-virtual interface you will get a response.
 
-To set it up simply get the index of the interface you want to listen to using the bash command, `ip link`, and substitute
-it in the program. Run the program with `go run 1printframe.go`, and you should see what the interface is receiving.
