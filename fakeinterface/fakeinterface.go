@@ -190,6 +190,17 @@ func (fi *FakeInterface) sendIPPayload(to *net.IPAddr, packet nettypes.IPPacket,
 			return fmt.Errorf("backoff for ARP request exceeded 30 seconds")
 		}
 	}
+	switch packet.IPProtocol() {
+	case nettypes.TCP:
+		tcp := nettypes.TCP_P(packet.Bytes())
+		tcp.SetChecksum(tcp.CalculateChecksum(len, fi.LocalIP.IP, to.IP))
+	case nettypes.UDP:
+		udp := nettypes.UDP_P(packet.Bytes())
+		udp.SetChecksum(udp.CalculateChecksum())
+	case nettypes.ICMP:
+		icmp := nettypes.ICMP_P(packet.Bytes())
+		icmp.SetChecksum(icmp.CalculateChecksum(len))
+	}
 	ipv4, l := IPv4Packet(fi.LocalIP, to, packet.IPProtocol(), packet.Bytes(), len)
 	return fi.sendEthPayload(ha, ipv4, l)
 }
