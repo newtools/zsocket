@@ -370,23 +370,15 @@ func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 		return framesFlushed, e1, nil
 	}
 	var errs []error = nil
-	if zs.txLossDisabled {
-		for t, w := index, written; w > 0; w-- {
-			tx := zs.txFrames[t]
-			if zs.txLossDisabled && tx.txWrongFormat() {
-				errs = append(errs, txIndexError(t))
-			} else {
-				framesFlushed++
-			}
-			tx.txSetMB()
-			t = (t + 1) % frameNum
-		}
-	} else {
-		for t, w := index, written; w > 0; w-- {
-			zs.txFrames[t].txSetMB()
+	for t, w := index, written; w > 0; w-- {
+		tx := zs.txFrames[t]
+		if zs.txLossDisabled && tx.txWrongFormat() {
+			errs = append(errs, txIndexError(t))
+		} else {
 			framesFlushed++
-			t = (t + 1) % frameNum
 		}
+		tx.txSetMB()
+		t = (t + 1) % frameNum
 	}
 	return framesFlushed, nil, errs
 }
