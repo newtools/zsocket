@@ -106,10 +106,14 @@ func errnoErr(e syscall.Errno) error {
 	return e
 }
 
-func copyFx(dst, src []byte, len uint16) {
+func copyFx(dst, src []byte, len uint16) uint16 {
 	copy(dst, src)
+	return len
 }
 
+// IZSocket is an interface for interacting with eth-iface like
+// objects in the ZSocket code-base. This has basically
+// simply enabled the FakeInterface code to work.
 type IZSocket interface {
 	MaxPackets() int32
 	MaxPacketSize() uint16
@@ -210,11 +214,13 @@ func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethT
 		if e1 != 0 {
 			return nil, errnoErr(e1)
 		}
-		/*if !zs.txLossDisabled {
-			if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_LOSS, 1); err != nil {
-				return nil, err
-			}
-		}*/
+		/*
+			Can't get this to work for some reason
+			if !zs.txLossDisabled {
+				if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_LOSS, 1); err != nil {
+					return nil, err
+				}
+			}*/
 	}
 
 	size := req.blockSize * req.blockNum
@@ -317,7 +323,7 @@ func (zs *ZSocket) WriteToBuffer(buf []byte, l uint16) (int32, error) {
 // ring buffer. However, it can take a function argument, that will
 // be passed the raw TX byes so that custom logic can be applied
 // to copying the frame (for example, encrypting the frame).
-func (zs *ZSocket) CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byte, l uint16)) (int32, error) {
+func (zs *ZSocket) CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byte, l uint16) uint16) (int32, error) {
 	if !zs.txEnabled {
 		return -1, fmt.Errorf("the TX ring is not enabled on this socket")
 	}
@@ -325,9 +331,9 @@ func (zs *ZSocket) CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byt
 	if err != nil {
 		return -1, err
 	}
-	tx.setTpLen(l)
-	tx.setTpSnapLen(l)
-	copyFx(tx.txStart, buf, l)
+	cL := copyFx(tx.txStart, buf, l)
+	tx.setTpLen(cL)
+	tx.setTpSnapLen(cL)
 	written := atomic.AddInt32(&zs.txWritten, 1)
 	if written == 1 {
 		atomic.SwapInt32(&zs.txWrittenIndex, txIndex)
@@ -347,18 +353,11 @@ func (zs *ZSocket) FlushFrames() (uint, error, []error) {
 		if index == -1 {
 			return 0, nil, nil
 		}
-		if !atomic.CompareAndSwapInt32(&zs.txWrittenIndex, index, -1) {
-			continue
+		if atomic.CompareAndSwapInt32(&zs.txWrittenIndex, index, -1) {
+			break
 		}
-		break
-
 	}
 	written := atomic.SwapInt32(&zs.txWritten, 0)
-	// this shouldn't happen given the index swapping logic above,
-	// but I'm a coward so we'll check anyways.
-	if written == 0 {
-		return 0, fmt.Errorf("race condition on the TX ring occured"), nil
-	}
 	framesFlushed := uint(0)
 	frameNum := int32(zs.frameNum)
 	z := uintptr(0)
