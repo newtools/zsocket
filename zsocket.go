@@ -13,7 +13,10 @@ import (
 )
 
 const (
-	MINIMUM_FRAME_SIZE = 2048
+	TPACKET_ALIGNMENT = 16
+
+	MINIMUM_FRAME_SIZE = TPACKET_ALIGNMENT << 7
+	MAXIMUM_FRAME_SIZE = TPACKET_ALIGNMENT << 11
 
 	ENABLE_RX       = 1 << 0
 	ENABLE_TX       = 1 << 1
@@ -28,8 +31,7 @@ const (
 	_PACKET_TX_RING = 0xd
 	_PACKET_LOSS    = 0xe
 
-	_TPACKET_V1        = 0
-	_TPACKET_ALIGNMENT = 16
+	_TPACKET_V1 = 0
 	/* rx status */
 	_TP_STATUS_KERNEL          = 0
 	_TP_STATUS_USER            = 1 << 0
@@ -86,10 +88,14 @@ func init() {
 	_TP_MAC_STOP = _TP_MAC_START + inet.HOST_SHORT_SIZE
 
 	_TX_START = _TP_MAC_STOP + inet.HOST_SHORT_SIZE + inet.HOST_INT_SIZE + inet.HOST_INT_SIZE
-	r := _TX_START % _TPACKET_ALIGNMENT
+	r := _TX_START % TPACKET_ALIGNMENT
 	if r > 0 {
-		_TX_START += (_TPACKET_ALIGNMENT - r)
+		_TX_START += (TPACKET_ALIGNMENT - r)
 	}
+}
+
+func PacketOffset() int {
+	return _TX_START
 }
 
 func errnoErr(e syscall.Errno) error {
@@ -150,11 +156,14 @@ type ZSocket struct {
 // an option can be passed that will tell the kernel to pay
 // attention to packet faults, called DISABLE_TX_LOSS.
 func NewZSocket(ethIndex, options int, maxFrameSize, maxTotalFrames uint, ethType nettypes.EthType) (*ZSocket, error) {
-	if maxFrameSize < MINIMUM_FRAME_SIZE {
-		return nil, fmt.Errorf("maxFrameSize must be at least 2048")
+	if maxFrameSize < MINIMUM_FRAME_SIZE ||
+		maxFrameSize > MAXIMUM_FRAME_SIZE ||
+		(maxFrameSize&(maxFrameSize-1)) > 0 {
+		return nil, fmt.Errorf("maxFrameSize must be at least %d (MINIMUM_FRAME_SIZE), be at most %d (MAXIMUM_FRAME_SIZE), and be a power of 2",
+			MINIMUM_FRAME_SIZE, MAXIMUM_FRAME_SIZE)
 	}
-	if maxTotalFrames < 16 {
-		return nil, fmt.Errorf("maxTotalFrames must be at least 16")
+	if maxTotalFrames < 16 && maxTotalFrames%8 == 0 {
+		return nil, fmt.Errorf("maxTotalFrames must be at least 16, and be a multiple of 8")
 	}
 
 	zs := new(ZSocket)
