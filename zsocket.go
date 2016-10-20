@@ -13,11 +13,11 @@ import (
 )
 
 const (
+	MINIMUM_FRAME_SIZE = 2048
+
 	ENABLE_RX       = 1 << 0
 	ENABLE_TX       = 1 << 1
 	DISABLE_TX_LOSS = 1 << 2
-	/* linux max order */
-	MAX_ORDER = 11
 )
 
 const (
@@ -118,7 +118,7 @@ type IZSocket interface {
 	MaxPackets() int32
 	MaxPacketSize() uint16
 	WrittenPackets() int32
-	Listen(fx func(*nettypes.Frame, uint16))
+	Listen(fx func(*nettypes.Frame, uint16, uint16))
 	WriteToBuffer(buf []byte, l uint16) (int32, error)
 	CopyToBuffer(buf []byte, l uint16, copyFx func(dst, src []byte, l uint16)) (int32, error)
 	FlushFrames() (uint, error, []error)
@@ -148,27 +148,16 @@ type ZSocket struct {
 // (by interfaceIndex). Whether the TX ring, RX ring, or both
 // are enabled are options that can be passed. Additionally,
 // an option can be passed that will tell the kernel to pay
-// attention to packet faults, called DISABLE_TX_LOSS. The
-// size of the ring-buffer can be manipulated with blockNum,
-// which must be a multiple of two. A block corresponds to 8KB.
-// For example, a 256 blockNum would create a 2MB ring-buffer.
-// `frameOrder` is the base 2 order of magnitude increase from
-// TP_ALIGNMENT that you want the frame size to be. Mostly you
-// can think of this argument as being the variable x in the
-// equation 16^x. The number must be between 5 and 12 (not including 5 and 12).
-// `framesInBlock` is the number of frames in a block. It has some complicated
-// contstraints, but the error messages will help you.
-// Finally the ethType can be specified, which will only place
-// packets matching the type in the ring buffer. "All" is an option.
-func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethType nettypes.EthType) (*ZSocket, error) {
-	if blockNum%2 != 0 {
-		return nil, fmt.Errorf("blockNum arg must be a multiple of 2")
+// attention to packet faults, called DISABLE_TX_LOSS.
+func NewZSocket(ethIndex, options int, maxFrameSize, maxTotalFrames uint, ethType nettypes.EthType) (*ZSocket, error) {
+	if maxFrameSize < MINIMUM_FRAME_SIZE {
+		return nil, fmt.Errorf("maxFrameSize must be at least 2048")
 	}
-	if frameOrder > MAX_ORDER || frameOrder < 6 {
-		return nil, fmt.Errorf("frameOrder must be smaller than %v and larger than 6", MAX_ORDER)
+	if maxTotalFrames < 16 {
+		return nil, fmt.Errorf("maxTotalFrames must be at least 16")
 	}
-	zs := new(ZSocket)
 
+	zs := new(ZSocket)
 	eT := inet.HToNS(ethType[0:])
 	// in Linux PF_PACKET is actually defined by AF_PACKET.
 	sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(eT))
@@ -193,16 +182,18 @@ func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethT
 	}
 
 	req := &tpacketReq{}
-	req.frameSize = _TPACKET_ALIGNMENT << MAX_ORDER
-	pageSize := os.Getpagesize()
-	req.blockSize = req.frameSize * uint(framesInBlock)
-	if req.blockSize%uint(pageSize) > 0 {
-		return nil, fmt.Errorf("given the arguments `frameOrder` of %v and `framesInBlock` of %v, the overall frameSize of zsocket is calculated as %v, in turn the block size of the zsocket buffer is calculated as %v, but block size must be a multiple of the os page size which is %v", frameOrder, framesInBlock, req.frameSize, req.blockSize, pageSize)
+	pageSize := uint(os.Getpagesize())
+	var frameSize uint
+	if maxFrameSize < pageSize {
+		frameSize = calculateLargestFrame(maxFrameSize)
+	} else {
+		frameSize = (maxFrameSize / pageSize) * pageSize
 	}
-	req.blockNum = uint(blockNum)
+	req.frameSize = frameSize
+	req.blockSize = req.frameSize * 8
+	req.blockNum = maxTotalFrames / 8
 	req.frameNum = (req.blockSize / req.frameSize) * req.blockNum
 	reqP := req.getPointer()
-
 	if zs.rxEnabled {
 		_, _, e1 := syscall.Syscall6(uintptr(syscall.SYS_SETSOCKOPT), uintptr(sock), uintptr(syscall.SOL_PACKET), uintptr(_PACKET_RX_RING), uintptr(reqP), uintptr(req.size()), 0)
 		if e1 != 0 {
@@ -260,6 +251,14 @@ func NewZSocket(ethIndex, options, blockNum, frameOrder, framesInBlock int, ethT
 	return zs, nil
 }
 
+func calculateLargestFrame(ceil uint) uint {
+	i := uint(MINIMUM_FRAME_SIZE)
+	for i < ceil {
+		i <<= 1
+	}
+	return (i >> 1)
+}
+
 // Returns the maximum amount of frame packets that can be written
 func (zs *ZSocket) MaxPackets() int32 {
 	return zs.frameNum
@@ -277,7 +276,7 @@ func (zs *ZSocket) WrittenPackets() int32 {
 }
 
 // Listen to all specified packets in the RX ring-buffer
-func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint16)) error {
+func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint16, uint16)) error {
 	if !zs.rxEnabled {
 		return fmt.Errorf("the RX ring is disabled on this socket")
 	}
@@ -296,7 +295,7 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint16)) error {
 	for {
 		for ; rf.rxReady(); rf = zs.rxFrames[rxIndex] {
 			f := nettypes.Frame(rf.raw[rf.macStart():])
-			fx(&f, rf.tpLen())
+			fx(&f, rf.tpLen(), rf.tpSnapLen())
 			rf.rxSet()
 			rxIndex = (rxIndex + 1) % zs.frameNum
 		}
@@ -507,6 +506,10 @@ func (rf *ringFrame) tpLen() uint16 {
 
 func (rf *ringFrame) setTpLen(v uint16) {
 	inet.PutInt(rf.raw[_TP_LEN_START:_TP_LEN_STOP], uint32(v))
+}
+
+func (rf *ringFrame) tpSnapLen() uint16 {
+	return uint16(inet.Int(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP]))
 }
 
 func (rf *ringFrame) setTpSnapLen(v uint16) {
