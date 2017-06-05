@@ -7,11 +7,11 @@ import (
 )
 
 func main() {
-	zs, err := zsocket.NewZSocket(14, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 32000, 128, nettypes.All)
+	zs, err := zsocket.NewZSocket(14, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 32768, 128, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
-	zs2, err := zsocket.NewZSocket(16, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 32000, 128, nettypes.All)
+	zs2, err := zsocket.NewZSocket(16, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 32768, 128, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
