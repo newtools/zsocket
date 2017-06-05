@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	zs, err := zsocket.NewZSocket(18, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 256, zsocket.MAX_ORDER, 4, nettypes.All)
+	zs, err := zsocket.NewZSocket(18, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 32768, 128, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
@@ -27,7 +27,7 @@ func main() {
 		panic(err)
 	}
 	go func() {
-		panic(zs.Listen(func(f *nettypes.Frame, frameLen uint16) {
+		panic(zs.Listen(func(f *nettypes.Frame, frameLen, capturedLen uint16) {
 			fmt.Println("20:")
 			fmt.Println(f.String(frameLen, 0))
 			processFrame(f, frameLen)
