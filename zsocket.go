@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/nathanjsweet/zsocket/inet"
-	"github.com/nathanjsweet/zsocket/nettypes"
+	"github.com/newtools/zsocket/inet"
+	"github.com/newtools/zsocket/nettypes"
 )
 
 const (

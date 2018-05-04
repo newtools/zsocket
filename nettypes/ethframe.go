@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/nathanjsweet/zsocket/inet"
+	"github.com/newtools/zsocket/inet"
 )
 
 type EthType [2]byte

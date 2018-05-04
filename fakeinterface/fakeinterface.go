@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nathanjsweet/zsocket/inet"
-	"github.com/nathanjsweet/zsocket/nettypes"
+	"github.com/newtools/zsocket/inet"
+	"github.com/newtools/zsocket/nettypes"
 )
 
 type FakeInterface struct {

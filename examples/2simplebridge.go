@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/nathanjsweet/zsocket"
-	"github.com/nathanjsweet/zsocket/nettypes"
+	"github.com/newtools/zsocket"
+	"github.com/newtools/zsocket/nettypes"
 )
 
 func main() {

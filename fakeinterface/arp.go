@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"net"
 
-	"github.com/nathanjsweet/zsocket/nettypes"
+	"github.com/newtools/zsocket/nettypes"
 )
 
 func ARPPacket(operation nettypes.ARPOperation, proto nettypes.EthType, senderHA net.HardwareAddr, senderIP *net.IPAddr, targetHA net.HardwareAddr, targetIP *net.IPAddr) (nettypes.ARP_P, uint16) {

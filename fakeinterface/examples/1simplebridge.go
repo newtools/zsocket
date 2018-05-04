@@ -5,9 +5,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/nathanjsweet/zsocket"
-	fi "github.com/nathanjsweet/zsocket/fakeinterface"
-	"github.com/nathanjsweet/zsocket/nettypes"
+	"github.com/newtools/zsocket"
+	fi "github.com/newtools/zsocket/fakeinterface"
+	"github.com/newtools/zsocket/nettypes"
 )
 
 func main() {

@@ -1,8 +1,8 @@
 package fakeinterface
 
 import (
-	"github.com/nathanjsweet/zsocket/inet"
-	"github.com/nathanjsweet/zsocket/nettypes"
+	"github.com/newtools/zsocket/inet"
+	"github.com/newtools/zsocket/nettypes"
 )
 
 func ICMPRequestReply(icmpType nettypes.ICMPType, code nettypes.ICMPCode, pay []byte, payL uint16) (nettypes.ICMP_P, uint16) {
