@@ -13,58 +13,58 @@ import (
 )
 
 const (
-	TPACKET_ALIGNMENT = 16
+	TPacketAlignment = 16
 
-	MINIMUM_FRAME_SIZE = TPACKET_ALIGNMENT << 7
-	MAXIMUM_FRAME_SIZE = TPACKET_ALIGNMENT << 11
+	MinimumFrameSize = TPacketAlignment << 7
+	MaximumFrameSize = TPacketAlignment << 11
 
-	ENABLE_RX       = 1 << 0
-	ENABLE_TX       = 1 << 1
-	DISABLE_TX_LOSS = 1 << 2
+	EnableRX      = 1 << 0
+	EnableTX      = 1 << 1
+	DisableTXLoss = 1 << 2
 )
 
 const (
-	_ETH_ALEN = 6
+	_ETHALen = 6
 
-	_PACKET_VERSION = 0xa
-	_PACKET_RX_RING = 0x5
-	_PACKET_TX_RING = 0xd
-	_PACKET_LOSS    = 0xe
+	_PacketVersion = 0xa
+	_PacketRXRing  = 0x5
+	_PacketTXRing  = 0xd
+	_PacketLoss    = 0xe
 
-	_TPACKET_V1 = 0
+	_TPacketV1 = 0
 	/* rx status */
-	_TP_STATUS_KERNEL          = 0
-	_TP_STATUS_USER            = 1 << 0
-	_TP_STATUS_COPY            = 1 << 1
-	_TP_STATUS_LOSING          = 1 << 2
-	_TP_STATUS_CSUMNOTREADY    = 1 << 3
-	_TP_STATUS_VLAN_VALID      = 1 << 4 /* auxdata has valid tp_vlan_tci */
-	_TP_STATUS_BLK_TMO         = 1 << 5
-	_TP_STATUS_VLAN_TPID_VALID = 1 << 6 /* auxdata has valid tp_vlan_tpid */
-	_TP_STATUS_CSUM_VALID      = 1 << 7
+	_TPStatusKernel        = 0
+	_TPStatusUser          = 1 << 0
+	_TPStatusCopy          = 1 << 1
+	_TPStatusLosing        = 1 << 2
+	_TPStatusCSumNotReady  = 1 << 3
+	_TPStatusVLanValid     = 1 << 4 /* auxdata has valid tp_vlan_tci */
+	_TPStatusBlkTMO        = 1 << 5
+	_TPStatusVLanTPidValid = 1 << 6 /* auxdata has valid tp_vlan_tpid */
+	_TPStatusCSumValid     = 1 << 7
 	/* tx status */
-	_TP_STATUS_AVAILABLE    = 0
-	_TP_STATUS_SEND_REQUEST = 1 << 0
-	_TP_STATUS_SENDING      = 1 << 1
-	_TP_STATUS_WRONG_FORMAT = 1 << 2
+	_TPStatusAvailable   = 0
+	_TPStatusSendRequest = 1 << 0
+	_TPStatusSending     = 1 << 1
+	_TPStatusWrongFormat = 1 << 2
 	/* tx and rx status */
-	_TP_STATUS_TS_SOFTWARE     = 1 << 29
-	_TP_STATUS_TS_RAW_HARDWARE = 1 << 31
+	_TPStatusTSSoftware    = 1 << 29
+	_TPStatusTSRawHardware = 1 << 31
 	/* poll events */
-	_POLLIN  = 0x01
-	_POLLOUT = 0x04
-	_POLLERR = 0x08
+	_PollIn  = 0x01
+	_PollOut = 0x04
+	_PollErr = 0x08
 )
 
 var (
-	_TP_MAC_START     int
-	_TP_MAC_STOP      int
-	_TP_LEN_START     int
-	_TP_LEN_STOP      int
-	_TP_SNAPLEN_START int
-	_TP_SNAPLEN_STOP  int
+	_TPMACStart     int
+	_TPMACStop      int
+	_TPLenStart     int
+	_TPLenStop      int
+	_TPSnapLenStart int
+	_TPSnapLenStop  int
 
-	_TX_START int
+	_TXStart int
 )
 
 // the top of every frame in the ring buffer looks like this:
@@ -78,24 +78,24 @@ var (
 //         unsigned int    tp_usec;
 //};
 func init() {
-	_TP_LEN_START = inet.HOST_LONG_SIZE
-	_TP_LEN_STOP = _TP_LEN_START + inet.HOST_INT_SIZE
+	_TPLenStart = inet.HOST_LONG_SIZE
+	_TPLenStop = _TPLenStart + inet.HOST_INT_SIZE
 
-	_TP_SNAPLEN_START = _TP_LEN_STOP
-	_TP_SNAPLEN_STOP = _TP_SNAPLEN_START + inet.HOST_INT_SIZE
+	_TPSnapLenStart = _TPLenStop
+	_TPSnapLenStop = _TPSnapLenStart + inet.HOST_INT_SIZE
 
-	_TP_MAC_START = _TP_SNAPLEN_STOP
-	_TP_MAC_STOP = _TP_MAC_START + inet.HOST_SHORT_SIZE
+	_TPMACStart = _TPSnapLenStop
+	_TPMACStop = _TPMACStart + inet.HOST_SHORT_SIZE
 
-	_TX_START = _TP_MAC_STOP + inet.HOST_SHORT_SIZE + inet.HOST_INT_SIZE + inet.HOST_INT_SIZE
-	r := _TX_START % TPACKET_ALIGNMENT
+	_TXStart = _TPMACStop + inet.HOST_SHORT_SIZE + inet.HOST_INT_SIZE + inet.HOST_INT_SIZE
+	r := _TXStart % TPacketAlignment
 	if r > 0 {
-		_TX_START += (TPACKET_ALIGNMENT - r)
+		_TXStart += (TPacketAlignment - r)
 	}
 }
 
 func PacketOffset() int {
-	return _TX_START
+	return _TXStart
 }
 
 func errnoErr(e syscall.Errno) error {
@@ -154,13 +154,13 @@ type ZSocket struct {
 // (by interfaceIndex). Whether the TX ring, RX ring, or both
 // are enabled are options that can be passed. Additionally,
 // an option can be passed that will tell the kernel to pay
-// attention to packet faults, called DISABLE_TX_LOSS.
+// attention to packet faults, called DisableTXLoss.
 func NewZSocket(ethIndex, options int, maxFrameSize, maxTotalFrames uint, ethType nettypes.EthType) (*ZSocket, error) {
-	if maxFrameSize < MINIMUM_FRAME_SIZE ||
-		maxFrameSize > MAXIMUM_FRAME_SIZE ||
+	if maxFrameSize < MinimumFrameSize ||
+		maxFrameSize > MaximumFrameSize ||
 		(maxFrameSize&(maxFrameSize-1)) > 0 {
-		return nil, fmt.Errorf("maxFrameSize must be at least %d (MINIMUM_FRAME_SIZE), be at most %d (MAXIMUM_FRAME_SIZE), and be a power of 2",
-			MINIMUM_FRAME_SIZE, MAXIMUM_FRAME_SIZE)
+		return nil, fmt.Errorf("maxFrameSize must be at least %d (MinimumFrameSize), be at most %d (MaximumFrameSize), and be a power of 2",
+			MinimumFrameSize, MaximumFrameSize)
 	}
 	if maxTotalFrames < 16 && maxTotalFrames%8 == 0 {
 		return nil, fmt.Errorf("maxTotalFrames must be at least 16, and be a multiple of 8")
@@ -177,16 +177,16 @@ func NewZSocket(ethIndex, options int, maxFrameSize, maxTotalFrames uint, ethTyp
 	sll := syscall.SockaddrLinklayer{}
 	sll.Protocol = eT
 	sll.Ifindex = ethIndex
-	sll.Halen = _ETH_ALEN
+	sll.Halen = _ETHALen
 	if err := syscall.Bind(sock, &sll); err != nil {
 		return nil, err
 	}
 
-	zs.rxEnabled = options&ENABLE_RX == ENABLE_RX
-	zs.txEnabled = options&ENABLE_TX == ENABLE_TX
-	zs.txLossDisabled = options&DISABLE_TX_LOSS == DISABLE_TX_LOSS
+	zs.rxEnabled = options&EnableRX == EnableRX
+	zs.txEnabled = options&EnableTX == EnableTX
+	zs.txLossDisabled = options&DisableTXLoss == DisableTXLoss
 
-	if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_VERSION, _TPACKET_V1); err != nil {
+	if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PacketVersion, _TPacketV1); err != nil {
 		return nil, err
 	}
 
@@ -204,20 +204,20 @@ func NewZSocket(ethIndex, options int, maxFrameSize, maxTotalFrames uint, ethTyp
 	req.frameNum = (req.blockSize / req.frameSize) * req.blockNum
 	reqP := req.getPointer()
 	if zs.rxEnabled {
-		_, _, e1 := syscall.Syscall6(uintptr(syscall.SYS_SETSOCKOPT), uintptr(sock), uintptr(syscall.SOL_PACKET), uintptr(_PACKET_RX_RING), uintptr(reqP), uintptr(req.size()), 0)
+		_, _, e1 := syscall.Syscall6(uintptr(syscall.SYS_SETSOCKOPT), uintptr(sock), uintptr(syscall.SOL_PACKET), uintptr(_PacketRXRing), uintptr(reqP), uintptr(req.size()), 0)
 		if e1 != 0 {
 			return nil, errnoErr(e1)
 		}
 	}
 	if zs.txEnabled {
-		_, _, e1 := syscall.Syscall6(uintptr(syscall.SYS_SETSOCKOPT), uintptr(sock), uintptr(syscall.SOL_PACKET), uintptr(_PACKET_TX_RING), uintptr(reqP), uintptr(req.size()), 0)
+		_, _, e1 := syscall.Syscall6(uintptr(syscall.SYS_SETSOCKOPT), uintptr(sock), uintptr(syscall.SOL_PACKET), uintptr(_PacketTXRing), uintptr(reqP), uintptr(req.size()), 0)
 		if e1 != 0 {
 			return nil, errnoErr(e1)
 		}
 		/*
 			Can't get this to work for some reason
 			if !zs.txLossDisabled {
-				if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PACKET_LOSS, 1); err != nil {
+				if err := syscall.SetsockoptInt(sock, syscall.SOL_PACKET, _PacketLoss, 1); err != nil {
 					return nil, err
 				}
 			}*/
@@ -246,14 +246,14 @@ func NewZSocket(ethIndex, options int, maxFrameSize, maxTotalFrames uint, ethTyp
 		}
 	}
 	if zs.txEnabled {
-		zs.txFrameSize = zs.frameSize - uint16(_TX_START)
+		zs.txFrameSize = zs.frameSize - uint16(_TXStart)
 		zs.txWritten = 0
 		zs.txWrittenIndex = -1
 		for t := 0; t < int(zs.frameNum); t, i = t+1, i+1 {
 			frLoc = i * int(zs.frameSize)
 			tx := &ringFrame{}
 			tx.raw = zs.raw[frLoc : frLoc+int(zs.frameSize)]
-			tx.txStart = tx.raw[_TX_START:]
+			tx.txStart = tx.raw[_TXStart:]
 			zs.txFrames = append(zs.txFrames, tx)
 		}
 	}
@@ -261,7 +261,7 @@ func NewZSocket(ethIndex, options int, maxFrameSize, maxTotalFrames uint, ethTyp
 }
 
 func calculateLargestFrame(ceil uint) uint {
-	i := uint(MINIMUM_FRAME_SIZE)
+	i := uint(MinimumFrameSize)
 	for i < ceil {
 		i <<= 1
 	}
@@ -294,7 +294,7 @@ func (zs *ZSocket) Listen(fx func(*nettypes.Frame, uint16, uint16)) error {
 	}
 	pfd := &pollfd{}
 	pfd.fd = zs.socket
-	pfd.events = _POLLERR | _POLLIN
+	pfd.events = _PollErr | _PollIn
 	pfd.revents = 0
 	pfdP := uintptr(pfd.getPointer())
 	rxIndex := int32(0)
@@ -406,7 +406,7 @@ func (zs *ZSocket) getFreeTx() (*ringFrame, int32, error) {
 	for !tx.txReady() {
 		pfd := &pollfd{}
 		pfd.fd = zs.socket
-		pfd.events = _POLLERR | _POLLOUT
+		pfd.events = _PollErr | _PollOut
 		pfd.revents = 0
 		timeout := -1
 		_, _, e1 := syscall.Syscall(syscall.SYS_POLL, uintptr(pfd.getPointer()), uintptr(1), uintptr(unsafe.Pointer(&timeout)))
@@ -506,41 +506,41 @@ type ringFrame struct {
 }
 
 func (rf *ringFrame) macStart() uint16 {
-	return inet.Short(rf.raw[_TP_MAC_START:_TP_MAC_STOP])
+	return inet.Short(rf.raw[_TPMACStart:_TPMACStop])
 }
 
 func (rf *ringFrame) tpLen() uint16 {
-	return uint16(inet.Int(rf.raw[_TP_LEN_START:_TP_LEN_STOP]))
+	return uint16(inet.Int(rf.raw[_TPLenStart:_TPLenStop]))
 }
 
 func (rf *ringFrame) setTpLen(v uint16) {
-	inet.PutInt(rf.raw[_TP_LEN_START:_TP_LEN_STOP], uint32(v))
+	inet.PutInt(rf.raw[_TPLenStart:_TPLenStop], uint32(v))
 }
 
 func (rf *ringFrame) tpSnapLen() uint16 {
-	return uint16(inet.Int(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP]))
+	return uint16(inet.Int(rf.raw[_TPSnapLenStart:_TPSnapLenStop]))
 }
 
 func (rf *ringFrame) setTpSnapLen(v uint16) {
-	inet.PutInt(rf.raw[_TP_SNAPLEN_START:_TP_SNAPLEN_STOP], uint32(v))
+	inet.PutInt(rf.raw[_TPSnapLenStart:_TPSnapLenStop], uint32(v))
 }
 
 func (rf *ringFrame) rxReady() bool {
-	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&_TP_STATUS_USER == _TP_STATUS_USER && atomic.CompareAndSwapUint32(&rf.mb, 0, 1)
+	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&_TPStatusUser == _TPStatusUser && atomic.CompareAndSwapUint32(&rf.mb, 0, 1)
 }
 
 func (rf *ringFrame) rxSet() {
-	inet.PutLong(rf.raw[0:inet.HOST_LONG_SIZE], uint64(_TP_STATUS_KERNEL))
+	inet.PutLong(rf.raw[0:inet.HOST_LONG_SIZE], uint64(_TPStatusKernel))
 	// this acts as a memory barrier
 	atomic.StoreUint32(&rf.mb, 0)
 }
 
 func (rf *ringFrame) txWrongFormat() bool {
-	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&_TP_STATUS_WRONG_FORMAT == _TP_STATUS_WRONG_FORMAT
+	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&_TPStatusWrongFormat == _TPStatusWrongFormat
 }
 
 func (rf *ringFrame) txReady() bool {
-	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&(_TP_STATUS_SEND_REQUEST|_TP_STATUS_SENDING) == 0
+	return inet.Long(rf.raw[0:inet.HOST_LONG_SIZE])&(_TPStatusSendRequest|_TPStatusSending) == 0
 }
 
 func (rf *ringFrame) txMBReady() bool {
@@ -548,7 +548,7 @@ func (rf *ringFrame) txMBReady() bool {
 }
 
 func (rf *ringFrame) txSet() {
-	inet.PutLong(rf.raw[0:inet.HOST_LONG_SIZE], uint64(_TP_STATUS_SEND_REQUEST))
+	inet.PutLong(rf.raw[0:inet.HOST_LONG_SIZE], uint64(_TPStatusSendRequest))
 }
 
 func (rf *ringFrame) txSetMB() {
@@ -561,28 +561,28 @@ func (rf *ringFrame) printRxStatus() {
 	if s == 0 {
 		fmt.Printf(" Kernel")
 	}
-	if _TP_STATUS_USER&s > 0 {
+	if _TPStatusUser&s > 0 {
 		fmt.Printf(" User")
 	}
-	if _TP_STATUS_COPY&s > 0 {
+	if _TPStatusCopy&s > 0 {
 		fmt.Printf(" Copy")
 	}
-	if _TP_STATUS_LOSING&s > 0 {
+	if _TPStatusLosing&s > 0 {
 		fmt.Printf(" Losing")
 	}
-	if _TP_STATUS_CSUMNOTREADY&s > 0 {
+	if _TPStatusCSumNotReady&s > 0 {
 		fmt.Printf(" CSUM-NotReady")
 	}
-	if _TP_STATUS_VLAN_VALID&s > 0 {
+	if _TPStatusVLanValid&s > 0 {
 		fmt.Printf(" VlanValid")
 	}
-	if _TP_STATUS_BLK_TMO&s > 0 {
+	if _TPStatusBlkTMO&s > 0 {
 		fmt.Printf(" BlkTMO")
 	}
-	if _TP_STATUS_VLAN_TPID_VALID&s > 0 {
+	if _TPStatusVLanTPidValid&s > 0 {
 		fmt.Printf(" VlanTPIDValid")
 	}
-	if _TP_STATUS_CSUM_VALID&s > 0 {
+	if _TPStatusCSumValid&s > 0 {
 		fmt.Printf(" CSUM-Valid")
 	}
 	rf.printRxTxStatus(s)
@@ -595,13 +595,13 @@ func (rf *ringFrame) printTxStatus() {
 	if s == 0 {
 		fmt.Printf(" Available")
 	}
-	if s&_TP_STATUS_SEND_REQUEST > 0 {
+	if s&_TPStatusSendRequest > 0 {
 		fmt.Printf(" SendRequest")
 	}
-	if s&_TP_STATUS_SENDING > 0 {
+	if s&_TPStatusSending > 0 {
 		fmt.Printf(" Sending")
 	}
-	if s&_TP_STATUS_WRONG_FORMAT > 0 {
+	if s&_TPStatusWrongFormat > 0 {
 		fmt.Printf(" WrongFormat")
 	}
 	rf.printRxTxStatus(s)
@@ -609,10 +609,10 @@ func (rf *ringFrame) printTxStatus() {
 }
 
 func (rf *ringFrame) printRxTxStatus(s uint64) {
-	if s&_TP_STATUS_TS_SOFTWARE > 0 {
+	if s&_TPStatusTSSoftware > 0 {
 		fmt.Printf(" Software")
 	}
-	if s&_TP_STATUS_TS_RAW_HARDWARE > 0 {
+	if s&_TPStatusTSRawHardware > 0 {
 		fmt.Printf(" Hardware")
 	}
 }

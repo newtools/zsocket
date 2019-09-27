@@ -24,17 +24,17 @@ func (ao ARPOperation) String() string {
 	return "unknown arp operation"
 }
 
-type ARP_P []byte
+type ARPPacket []byte
 
-func (a ARP_P) EthType() EthType {
+func (a ARPPacket) EthType() EthType {
 	return ARP
 }
 
-func (a ARP_P) Bytes() []byte {
+func (a ARPPacket) Bytes() []byte {
 	return a
 }
 
-func (a ARP_P) String(indent int) string {
+func (a ARPPacket) String(indent int) string {
 	return fmt.Sprintf(padLeft("Htype : %02x\n", "\t", indent), a.HardwareType()) +
 		fmt.Sprintf(padLeft("Ptype : %s\n", "\t", indent), a.ProtocolType()) +
 		fmt.Sprintf(padLeft("Hlen  : %d\n", "\t", indent), a.Hlen()) +
@@ -46,38 +46,38 @@ func (a ARP_P) String(indent int) string {
 		fmt.Sprintf(padLeft("TPA   : %s\n", "\t", indent), a.TPA())
 }
 
-func (a ARP_P) HardwareType() uint16 {
+func (a ARPPacket) HardwareType() uint16 {
 	return inet.NToHS(a[0:2])
 }
 
-func (a ARP_P) ProtocolType() EthType {
+func (a ARPPacket) ProtocolType() EthType {
 	return EthType{a[2], a[3]}
 }
 
-func (a ARP_P) Hlen() uint8 {
+func (a ARPPacket) Hlen() uint8 {
 	return uint8(a[4])
 }
 
-func (a ARP_P) Plen() uint8 {
+func (a ARPPacket) Plen() uint8 {
 	return uint8(a[5])
 }
 
-func (a ARP_P) Operation() ARPOperation {
+func (a ARPPacket) Operation() ARPOperation {
 	return ARPOperation(inet.NToHS(a[6:8]))
 }
 
-func (a ARP_P) SHA() net.HardwareAddr {
+func (a ARPPacket) SHA() net.HardwareAddr {
 	return net.HardwareAddr(a[8:14])
 }
 
-func (a ARP_P) SPA() net.IP {
+func (a ARPPacket) SPA() net.IP {
 	return net.IP(a[14:18])
 }
 
-func (a ARP_P) THA() net.HardwareAddr {
+func (a ARPPacket) THA() net.HardwareAddr {
 	return net.HardwareAddr(a[18:24])
 }
 
-func (a ARP_P) TPA() net.IP {
+func (a ARPPacket) TPA() net.IP {
 	return net.IP(a[24:28])
 }

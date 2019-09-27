@@ -43,17 +43,17 @@ func (p IPProtocol) String() string {
 	}
 }
 
-type IPv4_P []byte
+type IPv4Packet []byte
 
-func (i IPv4_P) EthType() EthType {
+func (i IPv4Packet) EthType() EthType {
 	return IPv4
 }
 
-func (i IPv4_P) Bytes() []byte {
+func (i IPv4Packet) Bytes() []byte {
 	return i
 }
 
-func (i IPv4_P) String(frameLen uint16, indent int) string {
+func (i IPv4Packet) String(frameLen uint16, indent int) string {
 	return fmt.Sprintf(padLeft("IP Len   : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Version  : %d\n", "\t", indent), i.Version()) +
 		fmt.Sprintf(padLeft("IHL      : %d\n", "\t", indent), i.IHL()) +
@@ -70,44 +70,44 @@ func (i IPv4_P) String(frameLen uint16, indent int) string {
 		i.PayloadString(frameLen, indent)
 }
 
-func (i IPv4_P) PayloadString(frameLen uint16, indent int) string {
+func (i IPv4Packet) PayloadString(frameLen uint16, indent int) string {
 	p, off := i.Payload()
 	frameLen -= off
 	indent++
 	switch i.Protocol() {
 	case TCP:
-		return TCP_P(p).String(frameLen, indent, i.SourceIP(), i.DestinationIP())
+		return TCPPacket(p).String(frameLen, indent, i.SourceIP(), i.DestinationIP())
 	case UDP:
-		return UDP_P(p).String(frameLen, indent)
+		return UDPPacket(p).String(frameLen, indent)
 	case ICMP:
-		return ICMP_P(p).String(frameLen, indent)
+		return ICMPPacket(p).String(frameLen, indent)
 	default:
 		indent--
 		return padLeft("unrecognized ip protocol...\n", "\t", indent)
 	}
 }
 
-func (i IPv4_P) Version() uint8 {
+func (i IPv4Packet) Version() uint8 {
 	return uint8(i[0] >> 4)
 }
 
-func (i IPv4_P) IHL() uint8 {
+func (i IPv4Packet) IHL() uint8 {
 	return uint8(i[0] & 0x0f)
 }
 
-func (i IPv4_P) Length() uint16 {
+func (i IPv4Packet) Length() uint16 {
 	return inet.NToHS(i[2:4])
 }
 
-func (i IPv4_P) Id() uint16 {
+func (i IPv4Packet) Id() uint16 {
 	return inet.NToHS(i[4:6])
 }
 
-func (i IPv4_P) Flags() uint8 {
+func (i IPv4Packet) Flags() uint8 {
 	return uint8(i[6] >> 5)
 }
 
-func (i IPv4_P) FlagsString() string {
+func (i IPv4Packet) FlagsString() string {
 	s := ""
 	f := i.Flags()
 	if f&0x01 == 0x01 {
@@ -119,23 +119,23 @@ func (i IPv4_P) FlagsString() string {
 	return s
 }
 
-func (i IPv4_P) FragmentOffset() uint16 {
+func (i IPv4Packet) FragmentOffset() uint16 {
 	return inet.NToHS([]byte{i[6] & 0x1f, i[7]})
 }
 
-func (i IPv4_P) TTLHopCount() uint8 {
+func (i IPv4Packet) TTLHopCount() uint8 {
 	return uint8(i[8])
 }
 
-func (i IPv4_P) Protocol() IPProtocol {
+func (i IPv4Packet) Protocol() IPProtocol {
 	return IPProtocol(i[9])
 }
 
-func (i IPv4_P) Checksum() uint16 {
+func (i IPv4Packet) Checksum() uint16 {
 	return inet.NToHS(i[10:12])
 }
 
-func (i IPv4_P) CalculateChecksum() uint16 {
+func (i IPv4Packet) CalculateChecksum() uint16 {
 	cs := uint32(inet.HostByteOrder.Uint16(i[0:2])) +
 		uint32(inet.HostByteOrder.Uint16(i[2:4])) +
 		uint32(inet.HostByteOrder.Uint16(i[4:6])) +
@@ -158,19 +158,19 @@ func (i IPv4_P) CalculateChecksum() uint16 {
 	return ^uint16(cs)
 }
 
-func (i IPv4_P) PacketCorrupt() bool {
+func (i IPv4Packet) PacketCorrupt() bool {
 	return i.Checksum() == i.CalculateChecksum()
 }
 
-func (i IPv4_P) SourceIP() net.IP {
+func (i IPv4Packet) SourceIP() net.IP {
 	return net.IP(i[12:16])
 }
 
-func (i IPv4_P) DestinationIP() net.IP {
+func (i IPv4Packet) DestinationIP() net.IP {
 	return net.IP(i[16:20])
 }
 
-func (i IPv4_P) Payload() ([]byte, uint16) {
+func (i IPv4Packet) Payload() ([]byte, uint16) {
 	off := uint16(i.IHL() * 4)
 	return i[off:], off
 }

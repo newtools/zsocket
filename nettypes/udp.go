@@ -6,17 +6,17 @@ import (
 	"github.com/newtools/zsocket/inet"
 )
 
-type UDP_P []byte
+type UDPPacket []byte
 
-func (t UDP_P) IPProtocol() IPProtocol {
+func (t UDPPacket) IPProtocol() IPProtocol {
 	return UDP
 }
 
-func (t UDP_P) Bytes() []byte {
+func (t UDPPacket) Bytes() []byte {
 	return t
 }
 
-func (t UDP_P) String(frameLen uint16, indent int) string {
+func (t UDPPacket) String(frameLen uint16, indent int) string {
 	return fmt.Sprintf(padLeft("UDP Len      : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Source Port  : %d\n", "\t", indent), t.SourcePort()) +
 		fmt.Sprintf(padLeft("Dest Port    : %d\n", "\t", indent), t.DestinationPort()) +
@@ -24,27 +24,27 @@ func (t UDP_P) String(frameLen uint16, indent int) string {
 		fmt.Sprintf(padLeft("CalcChecksum : %02x\n", "\t", indent), inet.HToNSFS(t.CalculateChecksum()))
 }
 
-func (t UDP_P) SourcePort() uint16 {
+func (t UDPPacket) SourcePort() uint16 {
 	return inet.NToHS(t[0:2])
 }
 
-func (t UDP_P) DestinationPort() uint16 {
+func (t UDPPacket) DestinationPort() uint16 {
 	return inet.NToHS(t[2:4])
 }
 
-func (t UDP_P) Length() uint16 {
+func (t UDPPacket) Length() uint16 {
 	return inet.NToHS(t[4:6])
 }
 
-func (t UDP_P) SetLength(v uint16) {
+func (t UDPPacket) SetLength(v uint16) {
 	inet.PutShort(t[4:6], v)
 }
 
-func (t UDP_P) Checksum() uint16 {
+func (t UDPPacket) Checksum() uint16 {
 	return inet.NToHS(t[6:8])
 }
 
-func (t UDP_P) CalculateChecksum() uint16 {
+func (t UDPPacket) CalculateChecksum() uint16 {
 	var cs uint32
 	i := 0
 	fl := t.Length()
@@ -63,10 +63,10 @@ func (t UDP_P) CalculateChecksum() uint16 {
 	return ^uint16(cs)
 }
 
-func (t UDP_P) SetChecksum(v uint16) {
+func (t UDPPacket) SetChecksum(v uint16) {
 	inet.PutShort(t[6:8], v)
 }
 
-func (t UDP_P) Payload() ([]byte, uint16) {
+func (t UDPPacket) Payload() ([]byte, uint16) {
 	return t[8:], 8
 }

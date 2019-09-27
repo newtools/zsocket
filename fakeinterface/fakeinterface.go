@@ -205,12 +205,12 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 		pLen -= mOff
 		switch pType {
 		case nettypes.ARP:
-			arp := nettypes.ARP_P(p)
+			arp := nettypes.ARPPacket(p)
 			if !fi.processIncomingArpRequest(arp) {
 				atomic.AddUint64(&fi.rxDropped, 1)
 			}
 		case nettypes.IPv4:
-			ipv4 := nettypes.IPv4_P(p)
+			ipv4 := nettypes.IPv4Packet(p)
 			if ipv4.PacketCorrupt() {
 				atomic.AddUint64(&fi.rxDropped, 1)
 			}
@@ -220,7 +220,7 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 			fromIP := net.IPAddr{ipv4.SourceIP(), ""}
 			switch ipProto {
 			case nettypes.TCP:
-				tcp := nettypes.TCP_P(ipPay)
+				tcp := nettypes.TCPPacket(ipPay)
 				if tcp.CalculateChecksum(pLen, ipv4.SourceIP(), ipv4.DestinationIP()) != tcp.Checksum() {
 					atomic.AddUint64(&fi.rxDropped, 1)
 				} else {
@@ -232,7 +232,7 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 					fi.socketLock.RUnlock()
 				}
 			case nettypes.UDP:
-				udp := nettypes.UDP_P(ipPay)
+				udp := nettypes.UDPPacket(ipPay)
 				csum := udp.Checksum()
 				if csum != 0 && csum != udp.CalculateChecksum() {
 					atomic.AddUint64(&fi.rxDropped, 1)
@@ -245,7 +245,7 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 					fi.socketLock.RUnlock()
 				}
 			case nettypes.ICMP:
-				icmp := nettypes.ICMP_P(ipPay)
+				icmp := nettypes.ICMPPacket(ipPay)
 				if inet.HToNSFS(icmp.CalculateChecksum(pLen)) != icmp.Checksum() {
 					atomic.AddUint64(&fi.rxDropped, 1)
 				} else {
@@ -267,7 +267,7 @@ func (fi *FakeInterface) receiveEthPayload(packet nettypes.Frame, length uint16)
 	return nil
 }
 
-func (fi *FakeInterface) processIncomingArpRequest(arp nettypes.ARP_P) bool {
+func (fi *FakeInterface) processIncomingArpRequest(arp nettypes.ARPPacket) bool {
 	oper := arp.Operation()
 	if oper == nettypes.Request {
 		if btsEqual(arp.TPA(), fi.LocalIP.IP) {

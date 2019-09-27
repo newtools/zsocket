@@ -242,9 +242,9 @@ func (f *Frame) GetPayString(frameLen uint16, indent int, tag VLANTag) string {
 	indent++
 	switch f.MACEthertype(tag) {
 	case ARP:
-		return ARP_P(p).String(indent)
+		return ARPPacket(p).String(indent)
 	case IPv4:
-		return IPv4_P(p).String(frameLen, indent)
+		return IPv4Packet(p).String(frameLen, indent)
 	default:
 		return "unknown eth payload...\n"
 	}

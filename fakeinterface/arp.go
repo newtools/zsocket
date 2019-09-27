@@ -7,9 +7,9 @@ import (
 	"github.com/newtools/zsocket/nettypes"
 )
 
-func ARPPacket(operation nettypes.ARPOperation, proto nettypes.EthType, senderHA net.HardwareAddr, senderIP *net.IPAddr, targetHA net.HardwareAddr, targetIP *net.IPAddr) (nettypes.ARP_P, uint16) {
+func ARPPacket(operation nettypes.ARPOperation, proto nettypes.EthType, senderHA net.HardwareAddr, senderIP *net.IPAddr, targetHA net.HardwareAddr, targetIP *net.IPAddr) (nettypes.ARPPacket, uint16) {
 	l := uint16(28)
-	arp := nettypes.ARP_P(make([]byte, l))
+	arp := nettypes.ARPPacket(make([]byte, l))
 	binary.BigEndian.PutUint16(arp[0:2], 1)
 	arp[2] = proto[0]
 	arp[3] = proto[1]
