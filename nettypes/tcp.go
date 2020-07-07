@@ -23,10 +23,10 @@ const (
 
 // this is set `hosttonetwork.go`
 // because it depends on an init func
-var _PROTO_TCP uint32
+var _ProtoTCP uint32
 
 func init() {
-	_PROTO_TCP = inet.HToNIFI(uint32(TCP))
+	_ProtoTCP = inet.HToNIFI(uint32(TCP))
 }
 
 func (c TCPControl) String() string {
@@ -61,17 +61,17 @@ func (c TCPControl) String() string {
 	return s[:len(s)-1]
 }
 
-type TCP_P []byte
+type TCPPacket []byte
 
-func (t TCP_P) IPProtocol() IPProtocol {
+func (t TCPPacket) IPProtocol() IPProtocol {
 	return TCP
 }
 
-func (t TCP_P) Bytes() []byte {
+func (t TCPPacket) Bytes() []byte {
 	return t
 }
 
-func (t TCP_P) String(frameLen uint16, indent int, srcAddr, destAddr net.IP) string {
+func (t TCPPacket) String(frameLen uint16, indent int, srcAddr, destAddr net.IP) string {
 	return fmt.Sprintf(padLeft("TCP Len      : %d\n", "\t", indent), frameLen) +
 		fmt.Sprintf(padLeft("Source Port  : %d\n", "\t", indent), t.SourcePort()) +
 		fmt.Sprintf(padLeft("Dest Port    : %d\n", "\t", indent), t.DestinationPort()) +
@@ -85,27 +85,27 @@ func (t TCP_P) String(frameLen uint16, indent int, srcAddr, destAddr net.IP) str
 		fmt.Sprintf(padLeft("URG Pointer  : %d\n", "\t", indent), t.UrgPointer())
 }
 
-func (t TCP_P) SourcePort() uint16 {
+func (t TCPPacket) SourcePort() uint16 {
 	return inet.NToHS(t[0:2])
 }
 
-func (t TCP_P) DestinationPort() uint16 {
+func (t TCPPacket) DestinationPort() uint16 {
 	return inet.NToHS(t[2:4])
 }
 
-func (t TCP_P) SequenceNumber() uint32 {
+func (t TCPPacket) SequenceNumber() uint32 {
 	return inet.NToHI(t[4:8])
 }
 
-func (t TCP_P) AckNumber() uint32 {
+func (t TCPPacket) AckNumber() uint32 {
 	return inet.NToHI(t[8:12])
 }
 
-func (t TCP_P) DataOffset() uint8 {
+func (t TCPPacket) DataOffset() uint8 {
 	return uint8(t[12] >> 4)
 }
 
-func (t TCP_P) Controls() TCPControl {
+func (t TCPPacket) Controls() TCPControl {
 	var c TCPControl = 0
 	if t[12]&0x1 == 0x1 {
 		c |= NS
@@ -140,15 +140,15 @@ func (t TCP_P) Controls() TCPControl {
 	return c
 }
 
-func (t TCP_P) WindowSize() uint16 {
+func (t TCPPacket) WindowSize() uint16 {
 	return inet.NToHS(t[14:16])
 }
 
-func (t TCP_P) Checksum() uint16 {
+func (t TCPPacket) Checksum() uint16 {
 	return inet.NToHS(t[16:18])
 }
 
-func (t TCP_P) CalculateChecksum(frameLen uint16, srcAddr, destAddr net.IP) uint16 {
+func (t TCPPacket) CalculateChecksum(frameLen uint16, srcAddr, destAddr net.IP) uint16 {
 	cs := uint32(inet.HostByteOrder.Uint16(t[0:2])) +
 		uint32(inet.HostByteOrder.Uint16(t[2:4])) +
 		uint32(inet.HostByteOrder.Uint16(t[4:6])) +
@@ -173,7 +173,7 @@ func (t TCP_P) CalculateChecksum(frameLen uint16, srcAddr, destAddr net.IP) uint
 	cs += uint32(inet.HostByteOrder.Uint16(srcAddr[2:4]))
 	cs += uint32(inet.HostByteOrder.Uint16(destAddr[0:2]))
 	cs += uint32(inet.HostByteOrder.Uint16(destAddr[2:4]))
-	cs += _PROTO_TCP
+	cs += _ProtoTCP
 	cs += inet.HToNIFI(uint32(frameLen))
 	for cs>>16 > 0 {
 		cs = (cs & 0xffff) + (cs >> 16)
@@ -181,15 +181,15 @@ func (t TCP_P) CalculateChecksum(frameLen uint16, srcAddr, destAddr net.IP) uint
 	return ^uint16(cs)
 }
 
-func (t TCP_P) SetChecksum(v uint16) {
+func (t TCPPacket) SetChecksum(v uint16) {
 	inet.PutShort(t[16:18], v)
 }
 
-func (t TCP_P) UrgPointer() uint16 {
+func (t TCPPacket) UrgPointer() uint16 {
 	return inet.NToHS(t[18:20])
 }
 
-func (t TCP_P) Payload() ([]byte, uint16) {
+func (t TCPPacket) Payload() ([]byte, uint16) {
 	off := uint16(t.DataOffset() * 4)
 	return t[off:], off
 }

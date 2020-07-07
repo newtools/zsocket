@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	zs, err := zsocket.NewZSocket(18, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 32768, 128, nettypes.All)
+	zs, err := zsocket.NewZSocket(18, zsocket.EnableRX|zsocket.EnableTX, 32768, 128, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
@@ -70,15 +70,15 @@ func processFrame(f *nettypes.Frame, frameLen uint16) {
 		ln := frameLen
 		mPay, mOff := f.MACPayload(nettypes.NotTagged)
 		ln -= mOff
-		ip := nettypes.IPv4_P(mPay)
+		ip := nettypes.IPv4Packet(mPay)
 		iPay, iOff := ip.Payload()
 		ln -= iOff
 		switch ip.Protocol() {
 		case nettypes.TCP:
-			tcp := nettypes.TCP_P(iPay)
+			tcp := nettypes.TCPPacket(iPay)
 			tcp.SetChecksum(tcp.CalculateChecksum(ln, ip.SourceIP(), ip.DestinationIP()))
 		case nettypes.UDP:
-			udp := nettypes.UDP_P(iPay)
+			udp := nettypes.UDPPacket(iPay)
 			udp.SetChecksum(udp.CalculateChecksum())
 		}
 	}

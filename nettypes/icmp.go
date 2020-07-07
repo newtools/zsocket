@@ -137,17 +137,17 @@ func (i ICMPCode) String(typ ICMPType) string {
 	return fmt.Sprintf("unkown code:%x", uint8(i))
 }
 
-type ICMP_P []byte
+type ICMPPacket []byte
 
-func (p ICMP_P) IPProtocol() IPProtocol {
+func (p ICMPPacket) IPProtocol() IPProtocol {
 	return ICMP
 }
 
-func (p ICMP_P) Bytes() []byte {
+func (p ICMPPacket) Bytes() []byte {
 	return p
 }
 
-func (p ICMP_P) String(frameLen uint16, indent int) string {
+func (p ICMPPacket) String(frameLen uint16, indent int) string {
 	typ := p.Type()
 	pay, _ := p.Payload()
 	ps := pay.String(typ, indent, frameLen-4)
@@ -162,19 +162,19 @@ func (p ICMP_P) String(frameLen uint16, indent int) string {
 	return s
 }
 
-func (p ICMP_P) Type() ICMPType {
+func (p ICMPPacket) Type() ICMPType {
 	return ICMPType(p[0])
 }
 
-func (p ICMP_P) Code() ICMPCode {
+func (p ICMPPacket) Code() ICMPCode {
 	return ICMPCode(p[1])
 }
 
-func (p ICMP_P) Checksum() uint16 {
+func (p ICMPPacket) Checksum() uint16 {
 	return inet.NToHS(p[2:4])
 }
 
-func (p ICMP_P) CalculateChecksum(frameLen uint16) uint16 {
+func (p ICMPPacket) CalculateChecksum(frameLen uint16) uint16 {
 	cs := uint32(inet.HostByteOrder.Uint16(p[0:2])) +
 		uint32(inet.HostByteOrder.Uint16(p[4:6])) +
 		uint32(inet.HostByteOrder.Uint16(p[6:8]))
@@ -195,13 +195,13 @@ func (p ICMP_P) CalculateChecksum(frameLen uint16) uint16 {
 	return ^uint16(cs)
 }
 
-func (p ICMP_P) Payload() (ICMP_Payload, uint16) {
-	return ICMP_Payload(p[4:]), 4
+func (p ICMPPacket) Payload() (ICMPPacketayload, uint16) {
+	return ICMPPacketayload(p[4:]), 4
 }
 
-type ICMP_Payload []byte
+type ICMPPacketayload []byte
 
-func (pay ICMP_Payload) String(typ ICMPType, indent int, length uint16) string {
+func (pay ICMPPacketayload) String(typ ICMPType, indent int, length uint16) string {
 	indent++
 	switch typ {
 	case RedirectMessage:

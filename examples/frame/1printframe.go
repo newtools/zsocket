@@ -12,7 +12,7 @@ func main() {
 	// unless you know what you're doing just pay attention to the interface index, whether
 	// or not you want the tx ring, rx ring, or both enabled, and what nettype you are listening
 	// for.
-	zs, err := zsocket.NewZSocket(14, zsocket.ENABLE_RX, 2048, 32, nettypes.All)
+	zs, err := zsocket.NewZSocket(14, zsocket.EnableRX, 2048, 32, nettypes.All)
 	if err != nil {
 		panic(err)
 	}

@@ -8,13 +8,13 @@ import (
 	"github.com/newtools/zsocket/nettypes"
 )
 
-const _STARTING_ID = 12345
+const _StartgingID = 12345
 
-var id uint32 = _STARTING_ID
+var id uint32 = _StartgingID
 
-func IPv4Packet(source, dest *net.IPAddr, proto nettypes.IPProtocol, pay []byte, len uint16) (nettypes.IPv4_P, uint16) {
+func IPv4Packet(source, dest *net.IPAddr, proto nettypes.IPProtocol, pay []byte, len uint16) (nettypes.IPv4Packet, uint16) {
 	l := 20 + len
-	ipv4 := nettypes.IPv4_P(make([]byte, l))
+	ipv4 := nettypes.IPv4Packet(make([]byte, l))
 	copy(ipv4[20:], pay[:len])
 	// 0100 0101
 	ipv4[0] = 69
@@ -38,6 +38,6 @@ func getNextId() uint16 {
 	if n <= 65535 {
 		return uint16(n)
 	}
-	atomic.CompareAndSwapUint32(&id, n, _STARTING_ID)
+	atomic.CompareAndSwapUint32(&id, n, _StartgingID)
 	return getNextId()
 }

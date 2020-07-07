@@ -2,16 +2,17 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/newtools/zsocket"
 	"github.com/newtools/zsocket/nettypes"
 )
 
 func main() {
-	zs, err := zsocket.NewZSocket(14, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 32768, 128, nettypes.All)
+	zs, err := zsocket.NewZSocket(14, zsocket.EnableRX|zsocket.EnableTX, 32768, 128, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
-	zs2, err := zsocket.NewZSocket(16, zsocket.ENABLE_RX|zsocket.ENABLE_TX, 32768, 128, nettypes.All)
+	zs2, err := zsocket.NewZSocket(16, zsocket.EnableRX|zsocket.EnableTX, 32768, 128, nettypes.All)
 	if err != nil {
 		panic(err)
 	}
@@ -54,11 +55,11 @@ func processFrame(f *nettypes.Frame, frameLen uint16) {
 		ln := frameLen
 		mPay, mOff := f.MACPayload(0)
 		ln -= mOff
-		ip := nettypes.IPv4_P(mPay)
+		ip := nettypes.IPv4Packet(mPay)
 		if ip.Protocol() == nettypes.TCP {
 			iPay, iOff := ip.Payload()
 			ln -= iOff
-			tcp := nettypes.TCP_P(iPay)
+			tcp := nettypes.TCPPacket(iPay)
 			tcp.SetChecksum(tcp.CalculateChecksum(ln, ip.SourceIP(), ip.DestinationIP()))
 		}
 	}
