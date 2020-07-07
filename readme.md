@@ -1,5 +1,5 @@
-ZSocket
--------
+# ZSocket
+
 ZSocket is a library that wraps the linux zero-copy socket syscall to create a ring buffer in a memory mapped file.
 It also contains some utility functions and types to help with a handful of layer 2, 3, and 4 types.
 It is a lot like libcap, except it has easy to understand facilities for writing (injecting packets) to an interface.
@@ -7,14 +7,15 @@ It is a lot like libcap, except it has easy to understand facilities for writing
 ZSocket doesn't contain or wrap any C/C++, and it is lock free and thread safe.
 
 The following program prints out all know layer types to ZSocket on a given interface:
+
 ```go
 package main
 
 import (
-	"fmt"
+    "fmt"
 
-	"github.com/newtools/zsocket"
-	"github.com/newtools/zsocket/nettypes"
+    "github.com/newtools/zsocket"
+    "github.com/newtools/zsocket/nettypes"
 )
 
 func main() {
